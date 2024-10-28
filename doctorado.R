@@ -4,9 +4,6 @@ setwd("/Volumes/Pengo2/Doctorado/data exploration")
 library ("tidyverse")
 library ("fastDummies")
 library("rjson")
-library("dplyr")
-library("tidyr")
-library("lubridate")
 library("gridExtra")
 
 # Processing penguin colony database ----
@@ -1698,11 +1695,419 @@ for (name in names(combined_list)) {
   write.csv(combined_list[[name]], file = file_path, row.names = FALSE)
 }
 
-    # Time series plots ----
+# Meteo analyses and plots ----
 library(ggplot2)
 library(gridExtra)
 
-# Function to create a time series plot for two variables
+setwd("/Users/albert/Desktop/doctorado_definitivo/combined_data")
+file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
+
+combined_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+names(combined_list) <- gsub("^\\./|\\.csv$", "", basename(file_list))
+
+combined_list <- lapply(combined_list, function(df) {
+  df %>%
+    mutate(year = year(date)) %>% # Extract the year from the date column
+    filter(year != 2014) # Keep entire years, drop obs from 2014
+  
+})
+
+    # Calculate statistics ----
+library(tidyverse)
+        # Mean and SD table ----
+
+calculate_stats <- function(df, df_name) {
+  
+  cols_to_analyze <- list(
+    c("temp_station", "temp_era5"),
+    c("vel_station", "vel_era5"),
+    c("pres_station", "pres_era5")
+  )
+  
+  # Initialize a data frame to store results
+  stats_df <- data.frame(df_name = df_name, stringsAsFactors = FALSE)
+  
+  # Loop through the columns and calculate stats
+  for (cols in cols_to_analyze) {
+    col1 <- cols[1]
+    col2 <- cols[2]
+    
+    # Calculate mean and sd, excluding NAs
+    stats <- df %>%
+      select(all_of(c(col1, col2))) %>%
+      na.omit() %>%
+      summarise(
+        !!paste0(col1, "_mean") := round(mean(get(col1)), 2),  # Round to 2 decimal places
+        !!paste0(col1, "_sd") := round(sd(get(col1)), 2),      # Round to 2 decimal places
+        !!paste0(col2, "_mean") := round(mean(get(col2)), 2),  # Round to 2 decimal places
+        !!paste0(col2, "_sd") := round(sd(get(col2)), 2)       # Round to 2 decimal places
+      )
+    
+    # Bind the stats to the results data frame
+    stats_df <- bind_cols(stats_df, stats)
+  }
+  
+  # Calculate stats for "hr_era5" and "hr_station" if they exist
+  if ("hr_station" %in% names(df) && "hr_era5" %in% names(df)) {
+    hr_stats <- df %>%
+      select(hr_station, hr_era5) %>%
+      na.omit() %>%
+      summarise(
+        hr_station_mean = round(mean(hr_station), 2),  # Round to 2 decimal places
+        hr_station_sd = round(sd(hr_station), 2),      # Round to 2 decimal places
+        hr_era5_mean = round(mean(hr_era5), 2),        # Round to 2 decimal places
+        hr_era5_sd = round(sd(hr_era5), 2)              # Round to 2 decimal places
+      )
+    
+    stats_df <- bind_cols(stats_df, hr_stats)
+  } else {
+    # If columns are missing, add NA values
+    stats_df <- bind_cols(stats_df,
+                          data.frame(hr_station_mean = NA, hr_station_sd = NA, hr_era5_mean = NA, hr_era5_sd = NA))
+  }
+  
+  return(stats_df)
+}
+
+# Calculate statistics for each data frame in combined_list
+results_list <- map(names(combined_list), ~ calculate_stats(combined_list[[.x]], .x))
+
+# Combine all results into a single data frame
+mean_sd_table <- bind_rows(results_list)
+
+write.csv(mean_sd_table, "mean_sd.csv", row.names = FALSE)
+
+        # Normalized Bias ----
+
+# Define column pairs for calculation
+cols_to_analyze <- list(
+  c("temp_station", "temp_era5"),
+  c("pres_station", "pres_era5"),
+  c("vel_station", "vel_era5"),
+  c("hr_station", "hr_era5")
+)
+
+# Function to calculate normalized bias without using summarise
+nbias_function <- function(df, cols) {
+  map_dfr(cols, function(pair) {
+    col1 <- pair[1]
+    col2 <- pair[2]
+    
+    if (col1 %in% names(df) && col2 %in% names(df) && "year" %in% names(df)) {
+      # Calculate mean of col1 for each year and join with original df
+      df <- df %>%
+        group_by(year) %>%
+        mutate(mean_col1_year = mean(!!sym(col1), na.rm = TRUE)) %>%
+        ungroup()
+      
+      # Filter out rows with NA in either col1 or col2
+      valid_rows <- df %>%
+        filter(!is.na(!!sym(col1)), !is.na(!!sym(col2)))
+      
+      # Calculate normalized bias
+      normalized_bias <- sum((valid_rows[[col2]] - valid_rows[[col1]]) / valid_rows$mean_col1_year, na.rm = TRUE) / nrow(valid_rows)
+      
+      # Return results as a data frame
+      data.frame(normalized_bias = round(normalized_bias, 3), 
+                 variable = paste(col1, "vs", col2))
+    } else {
+      data.frame(normalized_bias = NA, variable = paste(col1, "vs", col2))  # Return NA if columns are missing
+    }
+  })
+}
+
+# Apply the function to each data frame in combined_list
+nbias_results_list <- map_dfr(names(combined_list), function(name) {
+  df <- combined_list[[name]]
+  nbias_results <- nbias_function(df, cols_to_analyze)
+  nbias_results %>%
+    mutate(station = name)  # Add station name to results
+})
+
+# Reshape the results into a wide format
+nbias_results <- nbias_results_list %>%
+  pivot_wider(
+    names_from = variable,
+    values_from = normalized_bias
+  )
+
+write.csv(nbias_results, "nbias_results.csv", row.names = FALSE)
+
+        # Seasonal bias ----
+
+cols_to_analyze <- list(
+  c("temp_station", "temp_era5")
+)
+
+# Function to calculate bias grouped by season
+bias_function <- function(df, cols) {
+  map_dfr(cols, function(pair) {
+    col1 <- pair[1]
+    col2 <- pair[2]
+    
+    if (col1 %in% names(df) && col2 %in% names(df) && "season" %in% names(df)) {
+      
+      # Filter out rows with NA in either col1 or col2
+      valid_rows <- df %>%
+        filter(!is.na(!!sym(col1)), !is.na(!!sym(col2)))
+      
+      # Calculate bias grouped by season
+      bias_results <- valid_rows %>%
+        group_by(season) %>%
+        summarise(
+          bias = round(mean((!!sym(col2) - !!sym(col1)), na.rm = TRUE), 2) # round to 2 decimal places
+        )
+      return(bias_results)
+      
+    } else {
+      # Return NA if columns are missing or no season column
+      data.frame(season = NA, bias = NA, variable = paste(col1, "vs", col2))
+    }
+  })
+}
+
+# Apply the function to each data frame in combined_list
+bias_results_list <- map_dfr(names(combined_list), function(name) {
+  df <- combined_list[[name]]
+  bias_results <- bias_function(df, cols_to_analyze)
+  bias_results %>%
+    mutate(station = name)  # Add station name to results
+})
+
+# Reshape the results into a wide format, with one row per station and columns for each season and variable
+bias_results <- bias_results_list %>%
+  pivot_wider(
+    names_from = season,
+    values_from = bias
+  )
+
+# Save the resulting bias_results DataFrame as a CSV file
+write.csv(bias_results, "bias_results.csv", row.names = FALSE)
+
+# plot heat map with ggplot
+
+# Transform data into a long format for ggplot, reorder season levels, and station levels
+long_bias_results <- wide_bias_results %>%
+  pivot_longer(
+    cols = -station,  # Convert all columns except 'station'
+    names_to = "season",
+    values_to = "bias"
+  ) %>%
+  mutate(
+    season = factor(season, levels = c("DJF", "MAM", "JJA", "SON")),  # Reorder seasons
+    station = factor(station, levels = c("Prat", "Carlini", "Juan Carlos I", 
+                                         "O'Higgins", "Esperanza", "Vernadsky", 
+                                         "Rothera", "San Martin"))  # Reorder stations
+  )
+
+# Create the heatmap plot
+heatmap_plot <- ggplot(long_bias_results, aes(x = season, y = station, fill = bias)) +
+  geom_tile() +  # Use white borders for clarity
+  geom_text(aes(label = sprintf("%.2f", bias)), color = "black", size = 4) +  # Display values with 2 decimal places
+  scale_fill_gradient2(low = "darkblue", mid = "white", high = "tomato", 
+                       midpoint = 0, limits = c(-5.2, 1),  # Set fixed limits
+                       name = "Bias (ºC)") +
+  scale_x_discrete(position = "top") +  # Position season labels on top
+  scale_y_discrete(limits = rev(levels(long_bias_results$station))) +  # Reverse the order of stations
+  theme_minimal() +
+  labs(title = "Temperature Bias by Season",
+       x = "", y = "") +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 12),  # Adjust font size for x-axis
+    axis.text.y = element_text(angle = 0, hjust = 1, size = 12),  # Adjust font size for y-axis
+    plot.title = element_text(size = 14, hjust = 0.5),  # Center and enlarge the title
+    legend.text = element_text(size = 10),  # Adjust legend font size
+    legend.title = element_text(size = 10)  # Adjust legend title font size
+  )
+
+ggsave("bias_heatmap.png", plot = heatmap_plot, width = 5, height = 4, dpi = 300)
+
+          # Normalized Mean Absolute Error ----
+
+# Function to calculate normalized Mean Absolute Error (MAE)
+nmae_function <- function(df, cols) {
+  map_dfr(cols, function(pair) {
+    col1 <- pair[1]
+    col2 <- pair[2]
+    
+    if (col1 %in% names(df) && col2 %in% names(df) && "year" %in% names(df)) {
+      # Calculate mean of col1 for each year and join with original df
+      df <- df %>%
+        group_by(year) %>%
+        mutate(mean_col1_year = mean(!!sym(col1), na.rm = TRUE)) %>%
+        ungroup()
+      
+      # Filter out rows with NA in either col1 or col2
+      valid_rows <- df %>%
+        filter(!is.na(!!sym(col1)), !is.na(!!sym(col2)))
+      
+      # Calculate normalized MAE
+      normalized_mae <- sum(abs((valid_rows[[col2]] - valid_rows[[col1]]) / valid_rows$mean_col1_year))/ nrow(valid_rows)
+      
+      # Return results as a data frame
+      data.frame(normalized_mae = round(normalized_mae, 3),
+                 variable = paste(col1, "vs", col2))
+    } else {
+      data.frame(normalized_mae = NA, variable = paste(col1, "vs", col2))  # Return NA if columns are missing
+    }
+  })
+}
+
+# Apply the function to each data frame in combined_list
+nmae_results_list <- map_dfr(names(combined_list), function(name) {
+  df <- combined_list[[name]]
+  nmae_results <- nmae_function(df, cols_to_analyze)
+  nmae_results %>%
+    mutate(station = name)  # Add station name to results
+})
+
+# Reshape the results into a wide format
+nmae_results <- nmae_results_list %>%
+  pivot_wider(
+    names_from = variable,
+    values_from = normalized_mae
+  )
+
+write.csv(nmae_results, "nmae_results.csv", row.names = FALSE)
+
+        # use NMAE function from package DTWBI
+library(DTWBI)
+
+# Function to calculate normalized mae every pair of variables
+nmae_dtwbi_function <- function(df, cols) {
+  map_dfr(cols, function(pair) {
+    col1 <- pair[1]
+    col2 <- pair[2]
+    
+    if (col1 %in% names(df) && col2 %in% names(df)) {
+      df %>%
+        filter(!is.na(!!sym(col1)), !is.na(!!sym(col2))) %>%
+        summarise(normalized_mae = compute.nmae((!!sym(col2)), (!!sym(col1))) ) %>% # Calculate normalized bias
+        mutate(variable = paste(col1, "vs", col2))  # Add a label for the variable pair
+    } else {
+      data.frame(normalized_mae = NA, variable = paste(col1, "vs", col2))  # Return NA if columns are missing
+    }
+  })
+}
+
+# Calculate normalized biases for each data frame in combined_list
+nmae_dtwbi_results_list <- map_dfr(names(combined_list), function(name) {
+  df <- combined_list[[name]]
+  nmae_results <- nmae_dtwbi_function(df, cols_to_analyze)
+  nmae_results %>%
+    mutate(station = name)  # Add station name to results
+})
+
+# Reshape the results into a wide format
+nmae_dtwbi_results <- nmae_dtwbi_results_list %>%
+  pivot_wider(
+    names_from = variable,
+    values_from = normalized_mae
+  )
+
+        # Normalized RMSE ----
+
+# Function to calculate normalized Root Mean Squared Error (RMSE)
+nrmse_function <- function(df, cols) {
+  map_dfr(cols, function(pair) {
+    col1 <- pair[1]
+    col2 <- pair[2]
+    
+    if (col1 %in% names(df) && col2 %in% names(df) && "year" %in% names(df)) {
+      # Calculate mean of col1 for each year and join with original df
+      df <- df %>%
+        group_by(year) %>%
+        mutate(mean_col1_year = mean(!!sym(col1), na.rm = TRUE)) %>%
+        ungroup()
+      
+      # Filter out rows with NA in either col1 or col2
+      valid_rows <- df %>%
+        filter(!is.na(!!sym(col1)), !is.na(!!sym(col2)))
+      
+      # Calculate normalized RMSE
+      normalized_rmse <- sqrt(sum(((valid_rows[[col2]] - valid_rows[[col1]]) / valid_rows$mean_col1_year)^2) / nrow(valid_rows))
+      
+      # Return results as a data frame
+      data.frame(normalized_rmse = round(normalized_rmse, 3),
+                 variable = paste(col1, "vs", col2))
+    } else {
+      data.frame(normalized_rmse = NA, variable = paste(col1, "vs", col2))  # Return NA if columns are missing
+    }
+  })
+}
+
+# Apply the function to each data frame in combined_list
+nrmse_results_list <- map_dfr(names(combined_list), function(name) {
+  df <- combined_list[[name]]
+  nrmse_results <- nrmse_function(df, cols_to_analyze)
+  nrmse_results %>%
+    mutate(station = name)  # Add station name to results
+})
+
+# Reshape the results into a wide format
+nrmse_results <- nrmse_results_list %>%
+  pivot_wider(
+    names_from = variable,
+    values_from = normalized_rmse
+  )
+
+write.csv(nrmse_results, "nrmse_results.csv", row.names = FALSE)
+
+        # Correlation
+
+library(dplyr)
+library(purrr)
+library(tidyr)
+
+# Function to calculate Pearson correlation and p-value
+correlation_function <- function(df, cols) {
+  map_dfr(cols, function(pair) {
+    col1 <- pair[1]
+    col2 <- pair[2]
+    
+    if (col1 %in% names(df) && col2 %in% names(df)) {
+      # Filter out rows with NA in either col1 or col2
+      valid_rows <- df %>%
+        filter(!is.na(!!sym(col1)), !is.na(!!sym(col2)))
+      
+      # Calculate Pearson correlation and p-value
+      correlation_test <- cor.test(valid_rows[[col1]], valid_rows[[col2]], method = "pearson", conf.level = 0.95)
+      correlation_value <- correlation_test$estimate
+      p_value <- correlation_test$p.value
+      
+      # Return results as a data frame
+      data.frame(
+        correlation = round(correlation_test$estimate, 2),
+        p_value = p_value,
+        variable = paste(col1, "vs", col2)
+      )
+    } else {
+      data.frame(correlation = NA, p_value = NA, variable = paste(col1, "vs", col2))  # Return NA if columns are missing
+    }
+  })
+}
+
+# Apply the function to each data frame in combined_list
+correlation_results_list <- map_dfr(names(combined_list), function(name) {
+  df <- combined_list[[name]]
+  correlation_results <- correlation_function(df, cols_to_analyze)
+  correlation_results %>%
+    mutate(station = name)  # Add station name to results
+})
+
+# Reshape the results into a wide format
+correlation_results <- correlation_results_list %>%
+  pivot_wider(
+    names_from = variable,
+    values_from = c(correlation, p_value)
+  )
+
+# Save the resulting wide_correlation_results DataFrame as a CSV file
+write.csv(correlation_results, "correlation_results.csv", row.names = FALSE)
+
+    # Time series plots ----
+
+# Function to plot time series for two variables
 plot_time_series_pair <- function(df, var1, var2, ylab) {
   ggplot(df, aes(x = date)) +
     geom_line(aes(y = !!sym(var1), color = var1), size = 0.6, alpha = 0.7) +
