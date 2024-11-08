@@ -1,12 +1,12 @@
-# Dataset with all penguin counts available on penguinmap.com
-setwd("/Volumes/Pengo2/Doctorado/data exploration")
-
 library ("tidyverse")
 library ("fastDummies")
 library("rjson")
 library("gridExtra")
 
 # Processing penguin colony database ----
+setwd("/Volumes/Pengo2/Doctorado/data exploration")
+
+# Dataset with all penguin counts available on penguinmap.com
 d<- read.csv("CountQuery_V_4_1.csv")
 d$site_id <- as.factor(d$site_id)
 d <- d %>% rename(longitude = longitude_epsg_4326)
@@ -1698,22 +1698,28 @@ for (name in names(combined_list)) {
 # Meteo analyses and plots ----
 library(ggplot2)
 library(gridExtra)
+detach(stats, unload = TRUE)
+library(tidyverse)
+
 
 setwd("/Users/albert/Desktop/doctorado_definitivo/combined_data")
 file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
 
-combined_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+combined_list <- lapply(file_list, function(file) {
+  df <- read.csv(file)
+  df$date <- as.POSIXct(df$date, format = "%Y-%m-%d %H:%M:%S", tz = "UTC")  # Adjust format as needed
+  return(df)
+})
+
 names(combined_list) <- gsub("^\\./|\\.csv$", "", basename(file_list))
 
 combined_list <- lapply(combined_list, function(df) {
   df %>%
     mutate(year = year(date)) %>% # Extract the year from the date column
     filter(year != 2014) # Keep entire years, drop obs from 2014
-  
 })
 
     # Calculate statistics ----
-library(tidyverse)
         # Mean and SD table ----
 
 calculate_stats <- function(df, df_name) {
@@ -1834,10 +1840,12 @@ nbias_results <- nbias_results_list %>%
 write.csv(nbias_results, "nbias_results.csv", row.names = FALSE)
 
         # Seasonal bias ----
+# temperature bias
+cols_to_analyze <- list(c("temp_station", "temp_era5"))
+cols_to_analyze <- list(c("vel_station", "vel_era5"))
+cols_to_analyze <- list(c("pres_station", "pres_era5"))
+cols_to_analyze <- list(c("hr_station", "hr_era5"))
 
-cols_to_analyze <- list(
-  c("temp_station", "temp_era5")
-)
 
 # Function to calculate bias grouped by season
 bias_function <- function(df, cols) {
@@ -1887,7 +1895,7 @@ write.csv(bias_results, "bias_results.csv", row.names = FALSE)
 # plot heat map with ggplot
 
 # Transform data into a long format for ggplot, reorder season levels, and station levels
-long_bias_results <- wide_bias_results %>%
+long_bias_results <- bias_results %>%
   pivot_longer(
     cols = -station,  # Convert all columns except 'station'
     names_to = "season",
@@ -1905,7 +1913,7 @@ heatmap_plot <- ggplot(long_bias_results, aes(x = season, y = station, fill = bi
   geom_tile() +  # Use white borders for clarity
   geom_text(aes(label = sprintf("%.2f", bias)), color = "black", size = 4) +  # Display values with 2 decimal places
   scale_fill_gradient2(low = "darkblue", mid = "white", high = "tomato", 
-                       midpoint = 0, limits = c(-5.2, 1),  # Set fixed limits
+                       midpoint = 0,  # Set fixed limits
                        name = "Bias (ºC)") +
   scale_x_discrete(position = "top") +  # Position season labels on top
   scale_y_discrete(limits = rev(levels(long_bias_results$station))) +  # Reverse the order of stations
@@ -1920,7 +1928,8 @@ heatmap_plot <- ggplot(long_bias_results, aes(x = season, y = station, fill = bi
     legend.title = element_text(size = 10)  # Adjust legend title font size
   )
 
-ggsave("bias_heatmap.png", plot = heatmap_plot, width = 5, height = 4, dpi = 300)
+ggsave("temp_bias_heatmap.png", plot = heatmap_plot, width = 5, height = 4, dpi = 300)
+
 
           # Normalized Mean Absolute Error ----
 
@@ -2110,13 +2119,13 @@ write.csv(correlation_results, "correlation_results.csv", row.names = FALSE)
 # Function to plot time series for two variables
 plot_time_series_pair <- function(df, var1, var2, ylab) {
   ggplot(df, aes(x = date)) +
-    geom_line(aes(y = !!sym(var1), color = var1), size = 0.6, alpha = 0.7) +
-    geom_line(aes(y = !!sym(var2), color = var2), size = 0.6, alpha = 0.7) +
+    geom_line(aes(y = !!sym(var1), color = var1, group = 1), size = 0.3, alpha = 0.7) +
+    geom_line(aes(y = !!sym(var2), color = var2, group = 2), size = 0.3, alpha = 0.7) +
     labs(x = NULL, y = ylab) +
-    scale_color_manual(values = c("tomato", "black"),
-                       labels = c("Era5-Land","Station")) +
+    scale_color_manual(values = c("tomato", "black"), labels = c("Era5-Land","Station")) +
     theme_minimal() +
-    theme(legend.title = element_blank())
+    #theme(legend.title = element_blank()) 
+    theme(legend.position = "none")
 }
 
 
@@ -2142,29 +2151,267 @@ for (name in names(combined_list)) {
     plots$hr <- plot_time_series_pair(df, "hr_station", "hr_era5", "Relative humidity (%)")
   }
   
-  plot <- grid.arrange(grobs = plots, ncol = 1, top = paste(name, "Base"))
+  plot <- grid.arrange(grobs = plots, ncol = 1)#, top = paste(name, "Base"))
   
-  folder_path <- "/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/figures"
-  ggsave(filename = paste0(folder_path, "/", name, "_timeseries.png"), plot = plot, width = 10, height = 10, dpi = 300)
+#  folder_path <- "/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/figures"
+#  ggsave(filename = paste0(folder_path, "/", name, "_timeseries.png"), plot = plot, width = 7, height = 7, dpi = 300)
+  ggsave(filename = paste0(name, "_timeseries.png"), plot = plot, width = 7, height = 7, dpi = 300, bg = "transparent")
 }
 
 
     # Taylor diagrams ----
 library(plotrix)
-    # Taylor Diagram for temperature
-{oldpar <- taylor.diagram(combined_esperanza$temp_station, combined_esperanza$temp_era5, col = "red", sd.arcs = TRUE, pcex = 1.5)
-taylor.diagram(combined_jci$temp_station, combined_jci$temp_era5, add = TRUE, col = "blue", pcex = 1.5)
-taylor.diagram(combined_carlini$temp_station, combined_carlini$temp_era5, add = TRUE, col = "pink", pcex = 1.5)
-taylor.diagram(combined_ohiggins$temp_station, combined_ohiggins$temp_era5, add = TRUE, col = "yellow", pcex = 1.5)
-taylor.diagram(combined_prat$temp_station, combined_prat$temp_era5, add = TRUE, col = "green", pcex = 1.5)
-taylor.diagram(combined_rothera$temp_station, combined_rothera$temp_era5, add = TRUE, col = "purple", pcex = 1.5)
-taylor.diagram(combined_sanmartin$temp_station, combined_sanmartin$temp_era5, add = TRUE, col = "orange", pcex = 1.5)
-taylor.diagram(combined_vernadsky$temp_station, combined_vernadsky$temp_era5, add = TRUE, col = "lightblue", pcex = 1.5)
+combined_list <- combined_list[c("Prat", "Carlini", "Juan Carlos I", "O'Higgins", "Esperanza", "Vernadsky", "Rothera", "San Martin")]
 
-legend(x = 16, y = 26, legend = c("Carlini", "Esperanza", "Juan Carlos I", "O'higgins", "Prat", "Rothera", "San Martin", "Vernadsky"),
-       pch = 19, col = c("pink", "red", "blue", "yellow", "green", "purple", "orange", "lightblue"), bty = "n", pt.cex = 1.5)
-title(main = "2 m Temperature")
+png("taylor_temperature.png", width = 1500, height = 1500, res = 300, bg = "transparent")
+
+taylor.diagram(combined_list[[4]]$temp_station, combined_list[[4]]$temp_era5, col = "yellow", sd.arcs = TRUE,pch=19, pcex = 1.8, main = "")
+
+# Define colors corresponding to each dataset
+colors <- c("red", "blue", "pink", "yellow", "green", "purple", "orange", "lightblue")
+
+# Loop through each dataset in combined_list
+for (i in seq_along(combined_list)) {
+  df <- combined_list[[i]]
+  color <- colors[i]
+  
+  taylor.diagram(df$temp_station, df$temp_era5, add = TRUE, col = color, pch=19, pcex = 1.8)
+  
+  points(sd(df$temp_station, na.rm = TRUE), 0, col = color, pch = 19, cex = 1.5) # Reference sd for each station
+
 }
+
+# Add a legend for the datasets using their names
+legend_labels <- names(combined_list)  # Use the names of the data frames directly
+legend(x = 7.5, y = 9.5,
+       legend = legend_labels,
+       pch = 19, col = colors[seq_along(combined_list)], bty = "n", pt.cex = 1.5)
+
+title(main = "2 m Temperature", cex.main=2)
+
+dev.off()
+
+
+# Pressure diagram
+{ 
+png("taylor_pressure.png", width = 1500, height = 1500, res = 300, bg = "transparent")
+
+taylor.diagram(combined_list[[1]]$pres_station, combined_list[[1]]$pres_era5, col = "red",pch=1, sd.arcs = TRUE, pcex = 1.8, main = "")
+
+# Define colors corresponding to each dataset
+colors <- c("red", "blue", "pink", "yellow", "green", "purple", "orange", "lightblue")
+
+# Loop through each dataset in combined_list
+for (i in seq_along(combined_list)) {
+  df <- combined_list[[i]]
+  color <- colors[i]
+  
+  taylor.diagram(df$pres_station, df$pres_era5, add = TRUE, col = color, pch = 1, pcex = 1.8)
+  
+  points(sd(df$pres_station, na.rm = TRUE), 0, col = color, pch = 19, cex = 1.5) # Reference sd for each station
+  
+}
+
+# Add a legend for the datasets using their names
+legend_labels <- names(combined_list)  # Use the names of the data frames directly
+legend(x = 17, y = 22,
+       legend = legend_labels,
+       pch = 19, col = colors[seq_along(combined_list)], bty = "n", pt.cex = 1.5)
+
+title(main = "Surface Pressure", cex.main = 2)
+
+dev.off()
+
+}
+
+
+# Wind speed diagram
+{ 
+  png("taylor_vel.png", width = 1500, height = 1500, res = 300, bg = "transparent")
+  
+  taylor.diagram(combined_list[[1]]$vel_station, combined_list[[1]]$vel_era5, col = "red",pch=19, sd.arcs = TRUE, pcex = 1.8, main = "")
+  
+  # Define colors corresponding to each dataset
+  colors <- c("red", "blue", "pink", "yellow", "green", "purple", "orange", "lightblue")
+  
+  # Loop through each dataset in combined_list
+  for (i in seq_along(combined_list)) {
+    df <- combined_list[[i]]
+    color <- colors[i]
+    
+    taylor.diagram(df$vel_station, df$vel_era5, add = TRUE, col = color, pch = 19, pcex = 1.8)
+    
+    points(sd(df$vel_station, na.rm = TRUE), 0, col = color, pch = 19, cex = 1.5) # Reference sd for each station
+    
+  }
+  
+  # Add a legend for the datasets using their names
+  legend_labels <- names(combined_list)  # Use the names of the data frames directly
+  legend(x = 7.5, y = 10,
+         legend = legend_labels,
+         pch = 19, col = colors[seq_along(combined_list)], bty = "n", pt.cex = 1.5)
+  
+  title(main = "Wind Speed", cex.main = 2)
+  
+  dev.off()
+  
+}
+
+# Relative humidity diagram
+{ 
+  png("taylor_humidity.png", width = 1500, height = 1500, res = 300, bg = "transparent")
+  
+  taylor.diagram(combined_list[[1]]$hr_station, combined_list[[1]]$hr_era5, col = "red",pch=19, sd.arcs = TRUE, pcex = 1.8, main = "")
+  
+  # Define colors corresponding to each dataset
+  colors <- c("red", "pink", "yellow", "purple", "orange")
+  
+  # Loop through each dataset in combined_list
+  for (i in seq_along(combined_list)) {
+    df <- combined_list[[i]]
+    color <- colors[i]
+    
+    taylor.diagram(df$hr_station, df$hr_era5, add = TRUE, col = color, pch = 19, pcex = 1.8)
+    
+    points(sd(df$hr_station, na.rm = TRUE), 0, col = color, pch = 19, cex = 1.5) # Reference sd for each station
+    
+  }
+  
+  # Add a legend for the datasets using their names
+  legend_labels <- names(combined_list)  # Use the names of the data frames directly
+  legend(x = 7.5, y = 10,
+         legend = legend_labels,
+         pch = 19, col = colors[seq_along(combined_list)], bty = "n", pt.cex = 1.5)
+  
+  title(main = "Relative Humidity", cex.main = 2)
+  
+  dev.off()
+  
+}
+
+
+
+# Define the specific datasets to include
+selected_datasets <- c("Prat", "Juan Carlos I", "O'Higgins", "Vernadsky", "Rothera")
+
+# Create a PNG for the Taylor Diagram
+png("taylor_humidity.png", width = 1500, height = 1500, res = 300, bg = "transparent")
+
+# Initialize the Taylor diagram with the first selected dataset
+taylor.diagram(combined_list[[selected_datasets[1]]]$hr_station, 
+               combined_list[[selected_datasets[1]]]$hr_era5, 
+               col = "red", pch = 19, sd.arcs = TRUE, pcex = 1.8, main = "")
+
+# Define colors corresponding to each dataset
+colors <- c("red", "pink", "yellow", "purple", "orange")
+
+# Loop through each selected dataset in combined_list
+for (i in seq_along(selected_datasets)) {
+  dataset_name <- selected_datasets[i]
+  df <- combined_list[[dataset_name]]
+  color <- colors[i]
+  
+  # Plot the data on the Taylor diagram
+  taylor.diagram(df$hr_station, df$hr_era5, add = TRUE, col = color, pch = 19, pcex = 1.8)
+  
+  # Add a reference point for standard deviation for each station
+  points(sd(df$hr_station, na.rm = TRUE), 0, col = color, pch = 19, cex = 1.5) # Reference sd for each station
+}
+
+# Add a legend for the datasets using their names
+legend_labels <- gsub("combined_", "", selected_datasets)  # Remove prefix for clarity
+legend(x = 13.5, y = 18,
+       legend = legend_labels,
+       pch = 19, col = colors[seq_along(selected_datasets)], bty = "n", pt.cex = 1.5)
+
+# Add title to the diagram with enlarged font
+title(main = "Relative Humidity", cex.main = 2)
+
+# Close the PNG device
+dev.off()
+
+
+
+
+# Set the path for saving the plots
+save_path <- "/Users/albert/Desktop/doctorado_definitivo/combined_data/"
+
+# Loop through each data frame in combined_list to create a Taylor diagram for each station
+for (i in 1:length(combined_list)) {
+  # Get the current data frame
+  df <- combined_list[[i]]
+  
+  # Extract the name of the current data frame
+  data_frame_name <- names(combined_list)[i]  # Extract the name from combined_list
+  
+  # Create a new plot for the Taylor diagram
+  png(paste0(save_path, data_frame_name, "_taylor.png"), width = 1500, height = 1500, res = 300, bg = "transparent") 
+  
+  # Initialize the Taylor diagram with pressure as the first variable pair
+  oldpar <- taylor.diagram(df$pres_station, df$pres_era5, col = "blue", pcex = 1.5, main = data_frame_name, cex.main = 2)
+  
+  # Initialize a vector to store legend labels and colors
+  legend_labels <- c("Pressure")  # Start with Pressure
+  legend_colors <- c("blue")       # Corresponding color
+  
+  # Add temperature variable pair
+  taylor.diagram(df$temp_station, df$temp_era5, col = "red", sd.arcs = TRUE, pcex = 1.5, add = TRUE)
+  legend_labels <- c(legend_labels, "2m Temperature")
+  legend_colors <- c(legend_colors, "red")
+  
+  # Add wind speed variable pair
+  taylor.diagram(df$vel_station, df$vel_era5, add = TRUE, col = "green", pcex = 1.5)
+  legend_labels <- c(legend_labels, "Wind Speed")
+  legend_colors <- c(legend_colors, "green")
+  
+  # Check if 'hr_station' and 'hr_era5' are present before plotting
+  if (all(c("hr_station", "hr_era5") %in% names(df))) {
+    taylor.diagram(df$hr_station, df$hr_era5, add = TRUE, col = "yellow", pcex = 1.5)
+    legend_labels <- c(legend_labels, "Relative Humidity")
+    legend_colors <- c(legend_colors, "yellow")
+  } 
+  
+  # Add reference points for each variable
+  points(sd(df$pres_station, na.rm = TRUE), 0, pch = 21, col = "blue", bg = "blue", cex = 1.2)  # Reference for Pressure
+  points(sd(df$temp_station, na.rm = TRUE), 0, pch = 21, col = "red", bg = "red", cex = 1.2)   # Reference for Temperature
+  points(sd(df$vel_station, na.rm = TRUE), 0, pch = 21, col = "green", bg = "green", cex = 1.2) # Reference for Wind Speed
+  
+  # Check if 'hr_station' exists before adding reference point
+  if (all(c("hr_station") %in% names(df))) {
+    points(sd(df$hr_station, na.rm = TRUE), 0, pch = 21, col = "yellow", bg = "yellow", cex = 1.2) # Reference for Relative Humidity
+  }
+  
+  # Add legend for clarity with dynamic labels
+  legend(x = 15, y = 22, legend = legend_labels,
+         pch = 19, col = legend_colors, bty = "n", pt.cex = 1.5)
+  
+  # Finish saving the plot
+  dev.off()  # Close the device
+}
+
+
+
+ # first trial - taylor diagram for temperature
+
+{
+  taylor.diagram(combined_esperanza$temp_station, combined_esperanza$temp_era5, col = "red", sd.arcs = TRUE, pcex = 1.5)
+  taylor.diagram(combined_jci$temp_station, combined_jci$temp_era5, add = TRUE, col = "blue", pcex = 1.5)
+  taylor.diagram(combined_carlini$temp_station, combined_carlini$temp_era5, add = TRUE, col = "pink", pcex = 1.5)
+  taylor.diagram(combined_ohiggins$temp_station, combined_ohiggins$temp_era5, add = TRUE, col = "yellow", pcex = 1.5)
+  taylor.diagram(combined_prat$temp_station, combined_prat$temp_era5, add = TRUE, col = "green", pcex = 1.5)
+  taylor.diagram(combined_rothera$temp_station, combined_rothera$temp_era5, add = TRUE, col = "purple", pcex = 1.5)
+  taylor.diagram(combined_sanmartin$temp_station, combined_sanmartin$temp_era5, add = TRUE, col = "orange", pcex = 1.5)
+  taylor.diagram(combined_vernadsky$temp_station, combined_vernadsky$temp_era5, add = TRUE, col = "lightblue", pcex = 1.5)
+  
+  legend(x = 16, y = 26, legend = c("Prat","Carlini", "Juan Carlos I","O'higgins", "Esperanza", "Vernadsky", "Rothera", "San Martin"),
+         pch = 19, col = c("green", "pink", "blue", "yellow", "red", "lightblue", "purple", "orange"), bty = "n", pt.cex = 1.5)
+  title(main = "2 m Temperature")
+  print()
+}
+
+# Restore original plotting parameters
+par(oldpar)
+
     # Taylor Diagram for pressure
 {oldpar <- taylor.diagram(combined_esperanza$pres_station, combined_esperanza$pres_era5, col = "red", sd.arcs = TRUE, pcex = 1.5, main = "")
 taylor.diagram(combined_jci$pres_station, combined_jci$pres_era5, col = "blue", add = TRUE, pcex = 1.5, sd.arcs = TRUE)
@@ -2334,25 +2581,8 @@ ggwindrose(
 
 
 library(clifro)
-speed = combined_list[[1]]$vel_station
-direction = combined_list[[1]]$dir_station
-season = combined_list[[1]]$season
-
-windrose(
-  speed,
-  direction,
-  facet = season,
-  n_directions = 12,
-  n_speeds = 7,
-  col_pal = "YlOrRd",
-  ggtheme = "minimal",
-  legend_title = "Wind Speed (m/s)",
-  calm_wind = 0.5,
-  max = 35,
-  n_col = 2,
-  axis.text = element_blank(),
-  axis.ticks = element_blank()
-)
+library(viridis)
+library(RColorBrewer)
 
 # Function to create wind rose plot
 create_windrose <- function(df, var1, var2, var3, title) {
@@ -2361,17 +2591,22 @@ create_windrose <- function(df, var1, var2, var3, title) {
     direction = var2,
     facet = var3,
     n_directions = 12,
-    speed_cuts = c(0, 5, 10, 20, 30, 40, 50),  # Define consistent speed cuts
-    col_pal = "YlOrRd",
+    speed_cuts = c(0, 5, 10, 20, 30, 40),  # Define consistent speed cuts
+    col_pal =  ("YlOrRd"),
     ggtheme = "minimal",
     calm_wind = 0.5,
-    n_col = 1,
-    axis.text = element_blank()
+    n_col = 1
+    #axis.text = element_blank()
   ) +
     ggtitle(title) +
-    theme(plot.title = element_text(size = 10, hjust = 0.5),
-          legend.title = element_text(size = 9)
-    )
+    theme(
+      plot.title = element_text(size = 10, hjust = 0.5),
+      #legend.position = "none",          
+      panel.background = element_rect(fill = "grey10", color = NA),
+      panel.grid.major = element_line(color = "grey30"), 
+      strip.text = element_blank(),
+      axis.text.x = element_text(color = "white", size = 10, margin = margin(t = 5)) # Customize color and size of radial labels
+      ) 
 }
 
 for (name in names(combined_list)) {
@@ -2380,10 +2615,11 @@ for (name in names(combined_list)) {
 p1 <- create_windrose(df, df$vel_station, df$dir_station, df$season, "Station")  # First plot without legend
 p2 <- create_windrose(df, df$vel_era5, df$dir_era5, df$season, "Era5-Land")        # Second plot with legend
 
-plot <- grid.arrange(p1, p2, ncol = 2, widths = c(1, 1.1),  top = paste(name, "Base"))
+plot <- grid.arrange(p1, p2, ncol = 2,  top = paste(name, "Base"))
 
-folder_path <- "/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/figures"
-ggsave(filename = paste0(folder_path, "/", name, "_windrose.png"), plot = plot, width = 6, height = 6, dpi = 300)
+#folder_path <- "/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/figures"
+#ggsave(filename = paste0(folder_path, "/", name, "_windrose.png"), plot = plot, width = 6, height = 6, dpi = 300)
+ggsave(filename = paste0(name, "_windrose.png"), plot = plot, width = 6, height = 6, dpi = 300, bg = "transparent")
 }
 
 
