@@ -1748,7 +1748,6 @@ for (name in names(combined_list)) {
   write.csv(combined_list[[name]], file = file_path, row.names = FALSE)
 }
 
-<<<<<<< HEAD
 # Plots and analyses ----
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/combined_data")
 
@@ -1770,9 +1769,8 @@ list2env(setNames(combined_list, paste0("combined_", names(combined_list))), env
 names(combined_list) <- c("Carlini", "Esperanza", "Juan Carlos I", "O'Higgins", "Prat", "Rothera", "San Martin", "Vernadsky")
 
     # Time series plots ----
-=======
 # Meteo analyses and plots ----
->>>>>>> 7b4f189b2c372e0c5f7868920775f0f1ba19b01f
+
 library(ggplot2)
 library(gridExtra)
 detach(stats, unload = TRUE)
@@ -2966,3 +2964,4 @@ ggplot(pred, aes(x = perim_area)) +
 ggplot(pred, aes(x = elevation)) +
   geom_point(aes(y = productivity), size = 1, alpha = 0.5) +
   geom_line(aes(y = predicted_values), colour = "red")
+
