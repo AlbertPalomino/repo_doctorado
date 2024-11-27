@@ -86,8 +86,7 @@ locations <- lapply(depths, function(df) {
 tags <- read.csv("/media/ddonoso/Pengo2/antartida_22_23/harmony/AxyTrek/chinstrap_tags.csv")
 ind_tracks <- list()
 
-# Loop through each column in tags
-for (col in names(tags)) {
+for (col in names(tags)) {      # Loop through each column in tags
   selected_df <- depths[names(depths) %in% tags[[col]]]   # Get the data frames in depths matching the current col
   ind_tracks[[col]] <- bind_rows(selected_df, .id = "tag_id")   # Combine the selected data frames into one and store it in the new list
 }
@@ -110,7 +109,7 @@ ind_tracks <- lapply(seq_along(ind_tracks), function(i) {
 
 names(ind_tracks) <- original_names
 
-# Change the class of a column 
+# Change the class of specified columns 
 ind_tracks <- lapply(ind_tracks, function(df) {
   df$tag_id <- as.factor(df$tag_id)
   df$Activity <- as.factor(df$Activity)
@@ -124,6 +123,15 @@ ind_tracks <- lapply(ind_tracks, function(df) {
   df
 })
 
+# Save a time-depth csv file for each individual
+output_folder = "/media/ddonoso/Pengo2/antartida_22_23/harmony/AxyTrek/"
+
+lapply(names(ind_tracks), function(name) {
+  file_path <- file.path(output_folder, paste0(name, ".csv"))
+  write.csv(ind_tracks[[name]], file = file_path, row.names = FALSE)
+})
+
+# Test plots for visualiation of dive data
 ggplot(data=ind_tracks[[1]]) +
   geom_point(aes(x = date, y = Depth, color = tag_id))
 
