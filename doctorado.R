@@ -1664,6 +1664,25 @@ for (name in names(era5land)) {
 }
 
     # Combine era5land and stations with matching names ----
+# read era5land with modified wind dir and magnitude
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land")
+
+file_list <- list.files(pattern = "\\mag.csv$", full.names = TRUE, recursive = TRUE)
+
+era5land <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+
+names(era5land) <- c("carlini", "esperanza", "jci", "ohiggins", "prat", "rothera", "sanmartin", "vernadsky")
+
+# read processed station datasets
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/3hourly_stations")
+
+file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
+
+stations <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+
+names(stations) <- gsub("\\_station.csv$", "", basename(file_list))
+
+# Combine station and era5land files
 combined_list <- lapply(names(era5land), function(name) {
   df1 <- era5land[[name]]
   df2 <- stations[[name]]
@@ -1673,7 +1692,7 @@ combined_list <- lapply(names(era5land), function(name) {
   
   # Filter selected columns to only include those that exist in combined_df
   columns_to_select <- c("date", 
-                         "temp_station", "vel_station", "dir_station", "pres_station", "hr_station", 
+                         "temp_station", "vel_station", "dir_station", "pres_station", "hr_station", "wind_magnitude_station", "wind_direction_station", 
                          "temp_era5", "vel_era5", "dir_era5", "pres_era5", "hr_era5",
                          "temp_df1", "vel_df1", "dir_df1", "pres_df1", "hr_df1")
   
@@ -1687,6 +1706,40 @@ combined_list <- lapply(names(era5land), function(name) {
 
 # Assign names to the combined data frames and extract them to the global environment
 names(combined_list) <- names(era5land)
+
+combined_list <- lapply(combined_list, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, tz="UTC"))
+})
+
+# Calculate wind speed at 3m based on a logarithmic attenuation
+combined_list <- lapply(combined_list, function(df) {
+  
+  # Vector to store the value at x = 3 for each row
+  df$vel10 <- df$vel_era5
+  
+  # Iterate through each row to calculate the value at x = 3
+  for (i in 1:nrow(df)) {
+    y2 <- df$vel10[i]  # Get the vel value for the current row
+    x1 <- 0.0001
+    y1 <- 0
+    x2 <- 10
+    
+    # Calculate the coefficients a and c based on the current y2
+    a <- (y2 - y1) / (log(x2) - log(x1))
+    c <- y1 - a * log(x1)
+    
+    # Define the logarithmic function
+    log_function <- function(x) {
+      a * log(x) + c
+    }
+    
+    # Calculate the value at x = 3 for the current row
+    df$vel_era5[i] <- log_function(3)
+  }
+  return(df)
+})
+
 list2env(setNames(combined_list, paste0("combined_", names(combined_list))), envir = .GlobalEnv)
 
 names(combined_list) <- c("Carlini", "Esperanza", "Juan Carlos I", "O'Higgins", "Prat", "Rothera", "San Martin", "Vernadsky")
@@ -1697,6 +1750,26 @@ for (name in names(combined_list)) {
   file_path <- file.path(output_directory, paste0(name, ".csv"))
   write.csv(combined_list[[name]], file = file_path, row.names = FALSE)
 }
+
+# Plots and analyses ----
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/combined_data")
+
+file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
+
+combined_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+
+names(combined_list) <- gsub("\\.csv$", "", basename(file_list))
+
+names(combined_list) <- c("carlini", "esperanza", "jci", "ohiggins", "prat", "rothera", "sanmartin", "vernadsky")
+
+combined_list <- lapply(combined_list, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, tz="UTC"))
+})
+
+list2env(setNames(combined_list, paste0("combined_", names(combined_list))), envir = .GlobalEnv)
+
+names(combined_list) <- c("Carlini", "Esperanza", "Juan Carlos I", "O'Higgins", "Prat", "Rothera", "San Martin", "Vernadsky")
 
     # Time series plots ----
 library(ggplot2)
@@ -1742,7 +1815,6 @@ for (name in names(combined_list)) {
   folder_path <- "/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/figures"
   ggsave(filename = paste0(folder_path, "/", name, "_timeseries.png"), plot = plot, width = 10, height = 10, dpi = 300)
 }
-
 
     # Taylor diagrams ----
 library(plotrix)
