@@ -2,72 +2,38 @@ library(diveMove)
 library(ggplot2)
 library(ggmap)
 library(dplyr)
+library(sf)
+library(tidyverse)
 
 setwd("/media/ddonoso/Pengo2/antartida_22_23/harmony/AxyTrek/Barbijos")
-df <- read.csv("CP-01_S1.csv")
+#df <- read.csv("CP-01_S1.csv")
 folder_path <- "/media/ddonoso/Pengo2/antartida_22_23/harmony/AxyTrek/Barbijos"
 csv_files <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
 tracks <- lapply(csv_files, function(file) read.csv(file, row.names = NULL))
 names(tracks) <- tools::file_path_sans_ext(basename(csv_files))
 
-# Keep rows whith Depth and GPS data
-df_depth <- subset(df, !is.na(Depth))
-df_depth$date <- as.POSIXct(paste(df_depth$Date, df_depth$Time), format = "%d/%m/%Y %H:%M:%OS")
-df_loc <- subset(df_depth,!is.na(location.lat))
-
-# Plot GPS coordinates
-box <- make_bbox(lon = df_loc$location.lon, lat = df_loc$location.lat, f = .1) #from ggmap
-sq_map <- get_map(location = box, maptype = "terrain", source = "google")
-
-coastline <- st_read("/media/ddonoso/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp")
-coastline <- st_read("/media/ddonoso/Pengo2/Doctorado/data exploration/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp")
-coastline <- st_transform(coastline, crs = 4326)
-
 # Crop and buffer coastline
+
+#coastline <- st_read("/media/ddonoso/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp")
+coastline <- st_read("/media/ddonoso/Pengo2/Doctorado/data exploration/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp")
+coastline <- st_transform(coastline, crs = 3031)
+
 bbox <- st_bbox(c(xmin = -2822404, ymin = 1462637, xmax = -2466896, ymax = 1712945), crs = 3031)
 bbox_sf <- st_as_sfc(bbox)  # Convert bbox to spatial object
 coastline_crop <- st_crop(coastline, bbox_sf)
 coastline_crop_4326 <- st_transform(coastline_crop, crs = 4326)
-coastline_buff <- st_buffer(coastline_crop, dist=100)
-coastline_buff_4326 <- st_transform(coastline_buff, crs = 4326)
+#coastline_buff <- st_buffer(coastline_crop, dist=100)
+#coastline_buff_4326 <- st_transform(coastline_buff, crs = 4326)
+coastline <- st_transform(coastline, crs = 4326)
 
-# Remove points on the coast
-points_sf <- st_as_sf(df_loc, coords = c("location.lon", "location.lat"), crs = 4326)
-
-polygon_sf <- st_transform(coastline_buff, crs = st_crs(points_sf))
-points_within <- st_intersects(points_sf, polygon_sf, sparse = FALSE)
-points_outside <- points_sf[!points_within, ]
-
-points_outside <- st_filter(points_sf, colony_buff_4326, .predicate = st_disjoint)
-
-coords <- st_coordinates(points_outside$geometry)
-colnames(coords) <- c("location.lon", "location.lat")
-points_outside <- cbind(points_outside, coords)
-write.csv(points_outside, "track_barbijo.csv", row.names = FALSE)
-
-# Create buffer around colony
+# Create buffer area around colony
 colony=data.frame(x=-59.208966,y=-62.310199)
 POINT <- st_as_sf(x = colony, coords=c("x", "y"),crs= 4326)
 POINT <- st_transform(POINT, crs = 3031)
 colony_buff <- st_buffer(POINT, dist=200)
-colony_buff_4326 <- st_transform(colony_buff, crs = 4326)
+colony_buff <- st_transform(colony_buff, crs = 4326)
 
-# Plot data
-ggplot() + 
-  geom_sf(data = coastline_crop_4326, fill = "gray90", color = "black") +
-  geom_sf(data = colony_buff_4326, color = "red") +
-  geom_path(data = points_outside, aes(x = location.lon, y = location.lat), 
-            size = 1, lineend = "round") +
-  labs(x = " ", y = " ", title = "CP01-R1 tracks") +
-  theme_minimal() +
-  theme(legend.position = "none") +
-  coord_sf(
-    xlim = c(-59.6, -58.5),
-    ylim = c(-62.55, -62.2),
-    expand = FALSE  # Prevents ggplot from adding padding
-  )
-
- # Loop through tracks and extract depth observations (remove accelerometry)
+# Loop through tracks and extract depth observations (remove accelerometry)
 depths <- lapply(tracks, function(df) {
   df <- df %>%
     filter(!is.na(Depth)) %>%    # Filter rows where Depth is not NA
@@ -119,8 +85,10 @@ ind_tracks <- lapply(ind_tracks, function(df) {
 
 # Add a "deployment" column to each data frame
 ind_tracks <- lapply(ind_tracks, function(df) {
-  df$deployment <- as.factor(as.numeric(as.factor(df$tag_id)))
-  df
+  df <- df %>% 
+    arrange(date)
+    df$deployment <- as.factor(as.numeric(factor(df$tag_id, levels = unique(df$tag_id[order(df$date)]))))  # Reorder 'tag_id' factor levels based on the sorted 'date' column
+    df
 })
 
 # Save a time-depth csv file for each individual
@@ -131,7 +99,80 @@ lapply(names(ind_tracks), function(name) {
   write.csv(ind_tracks[[name]], file = file_path, row.names = FALSE)
 })
 
-# Test plots for visualiation of dive data
+# Remove points on land for one individual ----
+points_sf <- st_as_sf(df_loc, coords = c("location.lon", "location.lat"), crs = 4326)
+
+# polygon_sf <- st_transform(coastline_buff, crs = st_crs(points_sf))
+# points_within <- st_intersects(points_sf, polygon_sf, sparse = FALSE)
+# points_outside <- points_sf[!points_within, ]
+points_outside <- st_filter(points_sf, colony_buff, .predicate = st_disjoint)
+coords <- st_coordinates(points_outside$geometry)
+colnames(coords) <- c("location.lon", "location.lat")
+points_outside <- cbind(points_outside, coords)
+write.csv(points_outside, "track_barbijo.csv", row.names = FALSE)
+
+# Plot data
+ggplot() + 
+  geom_sf(data = coastline_crop_4326, fill = "gray90", color = "black") +
+  geom_sf(data = colony_buff_4326, color = "red") +
+  geom_path(data = points_outside, aes(x = location.lon, y = location.lat), 
+            size = 1, lineend = "round") +
+  labs(x = " ", y = " ", title = "CP01-R1 tracks") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  coord_sf(
+    xlim = c(-59.6, -58.5),
+    ylim = c(-62.55, -62.2),
+    expand = FALSE  # Prevents ggplot from adding padding
+  )
+
+# Remove points on land for all individuals ----
+
+# Create new lat and lon columns by filling missing values
+pengo1a <- ind_tracks[[1]]
+
+pengo1a <- pengo1a %>%
+  mutate(lat = location.lat, lon = location.lon) %>%
+  fill(lat, lon, .direction = "down")  %>%  # Fill downward first
+  fill(lat, lon, .direction = "up")  
+
+points_sf <- st_as_sf(pengo1a, coords = c("lon", "lat"), crs = 4326)
+points_outside <- st_filter(points_sf, colony_buff, .predicate = st_disjoint)
+coords <- st_coordinates(points_outside$geometry)
+colnames(coords) <- c("lon", "lat")
+points_outside <- cbind(points_outside, coords)
+pengo1a <- points_outside
+
+write.csv(points_outside, "track_barbijo.csv", row.names = FALSE)
+
+pengo1a <- pengo1a %>%
+  mutate(lat = location.lat, lon = location.lon) %>%
+  fill(lat, lon, .direction = "down") %>%  # Fill downward first
+  fill(lat, lon, .direction = "up") %>% 
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%  # Convert to sf object
+  st_filter(colony_buff, .predicate = st_disjoint) %>%  # Filter points outside the polygon
+  mutate(coords = st_coordinates(geometry)) %>%  # Extract coordinates
+  mutate(lon = coords[, 1], lat = coords[, 2]) %>% # Add coordinates as columns
+  st_drop_geometry() %>%
+  select(-starts_with("coords"))
+
+write.csv(pengo1a, "pengo1a.csv", row.names = FALSE)
+
+# Create TDR objects
+fp <- file.path("/media/ddonoso/Pengo2/antartida_22_23/harmony/AxyTrek","pengo1a.csv")
+sfp <- system.file(fp, package = "diveMove")
+srcfn <- basename(sfp)
+pengo1a <- read.csv(sfp, sep = ",")
+  
+tdr <- createTDR(time = pengo1a$date,
+                 depth = pengo1a$Depth,
+                 concurrentData = pengo1a[, -c(5,11)],
+                 dtime= 60,
+                 file = srcfn)
+
+plotTDR(tdr)
+
+# Test plots for visualiation of dive data ----
 ggplot(data=ind_tracks[[1]]) +
   geom_point(aes(x = date, y = Depth, color = tag_id))
 

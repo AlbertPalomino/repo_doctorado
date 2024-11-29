@@ -4,10 +4,10 @@ library("rjson")
 library("gridExtra")
 
 # Processing penguin colony database ----
-setwd("/Volumes/Pengo2/Doctorado/data exploration")
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration")
 
 # Dataset with all penguin counts available on penguinmap.com
-d<- read.csv("CountQuery_V_4_1.csv")
+d <- read.csv("CountQuery_V_4_1.csv")
 d$site_id <- as.factor(d$site_id)
 d <- d %>% rename(longitude = longitude_epsg_4326)
 d <- d %>% rename(latitude = latitude_epsg_4326)
@@ -81,6 +81,30 @@ Gentoo10 <- subset(gepe, gepe$n>9)
 
 gecol <- distinct(Gentoo10, site_id, .keep_all = TRUE)
 write.csv(gecol, "gecol.csv", row.names=FALSE)
+
+# extract chinstrap df for modeling ----
+
+Chinstrap10 <- Chinstrap10 %>%
+  filter( season_starting > 1979) %>%
+  mutate(season = Chinstrap10$season_starting - (min(Chinstrap10$season_starting) -1)) %>%
+  select(-cammlr_region,-count_type,-vantage,-reference) %>%
+  rename(
+    site = site_id
+    )
+
+chinstrap <- Chinstrap10 %>%
+  select(-longitude, -latitude, -site_name, -common_name, -day, -month, -year, -season_starting, -n) %>%
+  rename(Y = penguin_count)
+
+write.csv(chinstrap, "chinstrap.csv", row.names = FALSE)
+
+start_year <- chinstrap %>%
+  group_by(site) %>%
+  slice_head(n = 1) %>%
+  ungroup() %>%
+  select(-Y, -accuracy)
+
+write.csv(start_year, "first_year.csv", row.names = FALSE)
 
 # timeline plot for each colony ----
 df <- adpe
