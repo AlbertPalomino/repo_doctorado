@@ -1,3 +1,4 @@
+detach("package:stats", unload = TRUE)
 library ("tidyverse")
 library ("fastDummies")
 library("rjson")
@@ -825,36 +826,61 @@ fill_na_for_all_hours <- function(df) {
 write.csv(df, "palmer_3oct24.csv", row.names = FALSE)
 
       # PENDIENTE! Process months in 2019 with different structure ----
-setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/palmer_other_2019")
+library(data.table)
+
+setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/palmer_other_2019")
 
 # Define the path to folder containing the .txt files
-folder_path <- "/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/palmer_other_2019"
+folder_path <- "/Volumes/Pengo2/Doctorado/data exploration/meteo/palmer_other_2019"
 
 # List all .txt files in the folder
 file_list <- list.files(path = folder_path, pattern = "_BASE.txt$", full.names = FALSE, recursive = TRUE) # recursive to read within subfolders too
 
-# Initialize an empty list to store data frames
-df_list <- list()
-
 process_df <- function(df) {
   df <- df %>%
-    select(c(1:15)) %>% 
     mutate(V1 = as.POSIXct(paste(V1, V2, sep = " "), format = "%Y/%m/%d %H:%M:%S", tz = "UTC")) %>%
-    #select(-V2) %>% 
-    mutate(across(4:15, as.numeric)) %>% 
-    mutate(across(3, as.character))
+#    mutate(across(3:19, as.numeric)) %>% 
   return(df)
 }
 
-# Read files
+# Function to determine separator
+detect_separator <- function(file) {
+  first_line <- readLines(file, n = 2)[2]  # Read the first data line (skipping header line)
+  if (grepl("\t", first_line)) {
+    return("\t")  # Tab separator
+  } else if (grepl("  ", first_line)) {
+    return(" ")  # Double space separator
+  } else {
+    stop("Other separator in file", file)
+  }
+}
+
+# Initialize an empty list to store data frames
+df_list <- list()
+
 for (file in file_list) {
+  separator <- detect_separator(file)  # Detect separator
   df <- fread(file, fill = TRUE, na.strings = "NA", skip=1, header = FALSE)
-  df <- process_df(df)   # Standardize column types
-  df_list[[length(df_list) + 1]] <- df   # Add the dataframe to the list
+  df <- process_df(df)
+  df_list[[length(df_list) + 1]] <- df # Add the dataframe to the list
 }
 
 #Rename data frames as the txt files
 names(df_list) <- sub("\\.txt$", "", basename(file_list))
+
+# Loop through each dataframe and remove specified columns based on column count
+df_list <- lapply(df_list, function(df) {
+  num_cols <- ncol(df)
+  if (num_cols == 19) {
+    df <- df[, -c(2, 16:19)]     # Remove column 2 and columns 16 to 19
+  } else if (num_cols == 20) {
+    df <- df[, -c(15:20)]     # Remove columns 15 to 20
+  }
+  return(df)
+})
+
+combined_df <- bind_rows(df_list)
+names(combined_df) <- c("date",	"time", "ID", "vel", "dir",	"gust_vel",	"gust_dir",	"temp",	"hr",	"dew",	"pyranometer", "pres", "snow_depth", "prec",	"visibility",	"CBase1", "CBase2", "CBase3",	"vert_vis")
 
 # Combine all dataframes into one
 df <- bind_rows(df_list)
@@ -865,7 +891,21 @@ na_check <- sapply(df_list, function(df) any(is.na(df$V1)))
 na_dfs <- df_list[na_check] # Keep only the data frames that contain NA in V1
 
 
-    # Vernadsky ----
+# Palmer_clean_2019 ----
+
+palmer2019 <- read.csv("/Users/albert/Downloads/palmer_clean_2019.csv", sep = ",", header = TRUE)
+palmer2019 <- palmer2019 %>%
+  mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz = "UTC")) %>%
+  mutate(across(2:11, as.numeric))
+
+palmer <- read.csv("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_palmer/palmer_3oct24.csv")
+
+names(palmer2019) <- names(palmer)
+palmer_complete <- rbind(palmer,palmer2019)
+
+write.csv(palmer_complete,"palmer_28dec24.csv", row.names = FALSE)
+
+# Vernadsky ----
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_vernadsky")
 
 # Load necessary libraries
@@ -1242,6 +1282,46 @@ df <- df %>%
 # Save the combined dataframe to a .csv file
 write.csv(df, "rothera.csv", row.names = FALSE)
 
+    # Kirkwood ----
+setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/")
+
+process_df <- function(df) {
+  df <- df %>%
+    mutate(min_gmt = 00) %>%
+    mutate(date = as.POSIXct(paste(year, month_gmt, day_gmt, hour_gmt, min_gmt, sep = "-"), format = "%Y-%m-%d-%H-%M", tz = "UTC")) %>%   # Convert date to a formatted string
+    select(-c(1:4,6,9,10,13:18)) %>%   # Drop the original time columns and unnecessary columns
+    select(date, everything())  %>%    # Reorder columns, date first
+    mutate(across(2:5, as.numeric))    # Change class of numeric variables
+  return(df)
+}
+
+df <- read.csv("meteo_kirkwood/awsK.csv", sep = ",", header = TRUE)
+df <- process_df(df)
+
+# Transform wind direction to reference North and range from 0 to 360
+df <- df %>%
+  mutate(
+    dir = case_when(
+      wind_speed == 0 & wind_dir_e == 0 ~ 0, # If speed and direction are 0, keep as 0. It is likely a measurement error (e.g. frozen anemometer)
+      wind_dir_e > 0 ~ (90 - wind_dir_e) + 360,  # Positive: Counterclockwise from East
+      wind_dir_e <= 0 ~ (90 - wind_dir_e)  # Negative: Clockwise from East
+    ) %% 360  # Ensure range is 0-360
+  )
+
+df <- df %>%
+  rename(
+    pres = press_bar,
+    vel = wind_speed,
+    temp = temp_air,
+    hr = humidity ) %>%
+  select(-wind_dir_e) %>%
+  mutate(date = format(date, "%Y-%m-%d %H:%M:%S"))
+
+df$date <- as.character(df$date)
+
+# Save the dataframe to a .csv file
+write.csv(df, "kirkwood.csv", row.names = FALSE)
+
 # Stations and nearest grid point in ERA5-Land ----
 setwd("/media/donoso/Pengo2/Doctorado/datos_netcdf_rema/era5land")
 library(mapdata)
@@ -1299,8 +1379,9 @@ stations$distance <- distances / 1000 # Convert distances to kilometers and add 
 
 
     # Process weather station data and identify a study periods with less than 15 days of NAs per year ----
-setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
-#setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance30")
+
+#setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
+setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
 
 # List all .csv files in the folder
 file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
@@ -1311,10 +1392,34 @@ data_frames <- lapply(file_list, read.csv)
 # Name each data frame based on the file name
 names(data_frames) <- sub("\\.csv$", "", basename(file_list))
 
-lapply(names(data_frames), function(x) {
-  data_frames[[x]]$date <- as.POSIXct(data_frames[[x]]$date, tz="UTC") 
-  assign(x, data_frames[[x]], envir = .GlobalEnv)
+data_frames <- lapply(data_frames, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, tz="UTC")) %>%
+    select(!contains("skt")) %>%
+    select(!contains("prec"))
 })
+
+# Extract flag columns
+
+# Extract date and flag columns ( _ in header) 
+flag_dfs <- lapply(data_frames, function(df) {
+  cols_to_extract <- c("date", grep("_", names(df), value = TRUE))   # Identify columns that contain "_" or are named "date"
+  df_subset <- df[, cols_to_extract, drop = FALSE]   # Subset the data frame to include only these columns
+  df_subset <- df_subset %>%
+    relocate(date, .before = everything())  # Move 'date' column to the first position
+  names(df_subset) <- gsub("_.*$", "", names(df_subset))   # Remove suffix from headers
+  return(df_subset)
+})
+
+# Remove flag columns (with "_" in the header) from data_frames 
+data_frames <- lapply(data_frames, function(df) {
+  df %>%
+    select(!contains("_")) %>%  # Select columns that do not contain "_"
+    relocate(date, .before = everything())  # Move 'date' column to the first position
+})
+
+# Remove the 'kirkwood' data frame from flag_dfs list
+flag_dfs <- flag_dfs[!names(flag_dfs) %in% "palmer_flagged"]
 
 # Process files 15 NA days
 {ohiggins15 <- ohiggins_flagged %>%
@@ -1380,7 +1485,7 @@ df_list15 <- list(ohiggins15, carlini15, esperanza15, jci15, prat15, rothera15, 
 #df_list30 <- list(ohiggins30, carlini30, esperanza30, jci30, prat30, rothera30, sanmartin30, vernadsky30)
 
 # Combine all data frames by date and filter
-df <- df_list15 %>%
+df <- flag_dfs %>%
   Reduce(function(x, y) full_join(x, y, by = "date"), .) %>%
   filter(if_all(-date, ~ . == 1))
 
