@@ -1,8 +1,12 @@
+# Load necessary libraries
 detach("package:stats", unload = TRUE)
 library ("tidyverse")
 library ("fastDummies")
 library("rjson")
 library("gridExtra")
+library(dplyr) # For data manipulation
+library(lubridate) # For date-time functions
+library(stringr)
 
 # Processing penguin colony database ----
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration")
@@ -669,7 +673,7 @@ library(stringr)
 library(data.table)
 
 #setwd("/Volumes/Pengo2/Doctorado/data exploration")
-setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_palmer")
+setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_palmer")
 
 # Define the path to folder containing the .txt files
 #folder_path <- "/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_palmer"
@@ -905,6 +909,48 @@ palmer_complete <- rbind(palmer,palmer2019)
 
 write.csv(palmer_complete,"palmer_28dec24.csv", row.names = FALSE)
 
+# Palmer 2001-2015
+folder_path <- "/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_palmer"
+df <- read.delim("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_palmer/2001/December/ar011201.100", header = TRUE, skip = 1)
+
+process_df <- function(df) {
+  df <- df %>%
+    mutate(date = as.POSIXct(paste(Date, Time, sep = " "), format = "%d/%m/%y %H:%M:%S", tz = "UTC")) %>%   # Convert date to a formatted string
+    select(date, everything())  %>%    # Reorder columns, date first
+    select(c(1,6,8,12,13,14,17,18,19)) %>%   # Drop the original time columns and unnecessary columns
+    mutate(across(2:9, as.numeric))    # Change class of numeric variables
+  return(df)
+}
+
+df <- process_df(df)
+
+# Find all .100 files in the folder and its subfolders
+file_list <- list.files(path = folder_path, pattern = "\\.100$", recursive = TRUE, full.names = TRUE)
+
+# Read each .100 file into a data frame and store in a list
+df_list <- lapply(file_list, function(file) {
+  read.delim(file, skip = 1, header = TRUE)
+})
+
+df_list <- lapply(df_list, function(df) {
+  df <- df %>%
+    mutate(date = as.POSIXct(paste(Date, Time, sep = " "), format = "%d/%m/%y %H:%M:%S", tz = "UTC")) %>%   # Convert date to a formatted string
+    select(date, everything())  %>%    # Reorder columns, date first
+    #select(c(1,4,5,6,8,12,13,14,17,18,19)) %>%   # Drop the original time columns and unnecessary columns
+    mutate(across(6:30, as.numeric))    # Change class of numeric variables
+  return(df)
+})
+
+combined_df <- bind_rows(df_list)
+
+names(combined_df) <- c("date",	"time", "ID", "vel", "dir",	"gust_vel",	"gust_dir",	"temp",	"hr",	"dew",	"pyranometer", "pres", "snow_depth", "prec",	"visibility",	"CBase1", "CBase2", "CBase3",	"vert_vis")
+
+
+# Assign file names (without extensions) as names of the list
+names(df_list) <- basename(file_list) %>% tools::file_path_sans_ext()
+
+# Inspect the list of data frames
+str(df_list)
 # Vernadsky ----
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_vernadsky")
 
@@ -1202,16 +1248,7 @@ write.csv(df, file = "vernadsky_ukr.csv", row.names = FALSE)
 
     # Carlini, Esperanza, San Martin ----
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo")
-
-# Load necessary libraries
-library(dplyr) # For data manipulation
-library(lubridate) # For date-time functions
-library(stringr)
-
-# Define the path to folder containing the .txt files
 folder_path <- "/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_argentina"
-
-# List all .txt files in the folder
 file_list <- list.files(path = folder_path, pattern = "*.txt$", full.names = TRUE)
 
 process_df <- function(df) {
@@ -1230,19 +1267,10 @@ process_df <- function(df) {
 
 # Loop through each file and process it
 for (file in file_list) {
-  # Extract the base name of the file (without the path and extension)
-  file_name <- tools::file_path_sans_ext(basename(file))
-
-  # Read the current file
-  df <- read.delim(file, sep = "", header = TRUE, skip = 2, dec = ",") # Adjust the sep, header, and skip parameters as needed
-  
-  # Apply the function process_df
+  file_name <- tools::file_path_sans_ext(basename(file))   # Extract the base name of the file (without the path and extension)
+  df <- read.delim(file, sep = "", header = TRUE, skip = 2, dec = ",")
   df <- process_df(df)
-  
-  # Create the CSV file name
   csv_file_name <- paste0(file_name, ".csv")
-  
-  # Save the processed dataframe to a .csv file
   write.csv(df, file = csv_file_name, row.names = FALSE)
   
   # Print a message to confirm the file was saved
@@ -1250,23 +1278,23 @@ for (file in file_list) {
 }
 
     # Rothera ----
-setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_rothera")
+setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_rothera")
 
 process_df <- function(df) {
   df <- df %>%
     # Convert time to a formatted string
-    mutate(date = as.POSIXct(paste(V1, V2, V3, V4, V5, sep = "-"), format = "%Y-%m-%d-%H-%M", tz = "UTC")) %>%
+    mutate(date = as.POSIXct(paste(year, month, day, hour, min, sep = "-"), format = "%Y-%m-%d-%H-%M", tz = "UTC")) %>%
     # Drop the original time columns and unnecessary columns
-    select(-c(1:6,9,14,15,17:20,22:34)) %>%
+    select(-c(1:5)) %>% #,9,14,15,17:20,22:34)) %>%
     # Reorder columns, date first
     select(date, everything())  %>% 
-    # Change ckass of numeric variables
-    mutate(across(2:9, as.numeric))
+    # Change class of numeric variables
+    mutate(across(2:8, as.numeric))
   return(df)
 }
 
 # Read and process data from Rothera
-df <- read.delim("rothera.txt", sep = "", header = FALSE, skip = 2, dec = ".")
+df <- read.delim("rothera2025.txt", sep = "", header = TRUE, skip = 0, dec = ".")
 df <- process_df(df)
 df <- df %>%
   rename( 
@@ -1280,7 +1308,9 @@ df <- df %>%
     dew = V21)
 
 # Save the combined dataframe to a .csv file
-write.csv(df, "rothera.csv", row.names = FALSE)
+df$date <- format(df$date, "%Y-%m-%d %H:%M:%S")
+
+write.csv(df, "rothera2025.csv", row.names = FALSE)
 
     # Kirkwood ----
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/")
