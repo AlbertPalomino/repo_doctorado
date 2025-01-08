@@ -444,6 +444,36 @@ escudero <- merged[merged$date > as.POSIXct("1979-12-31 21:00:00", tz="UTC"),]
 write.csv(escudero, "escudero.csv", row.names = FALSE)
 rm(hum,dew,pres,prec,temp,wind,tmax,tmin,diarioRR)
 
+# fill escudero with hourly data ----
+
+# Step 1: Determine min and max dates 
+min_date <- as.POSIXct(min(escudero$date))
+max_date <- as.POSIXct(max(escudero$date))
+
+# Step 2: Create a vector of hourly dates
+hourly_dates <- data.frame(date = seq(min_date, max_date, by = "hour"))
+
+# Step 3: Fill missing hours by performing a full join
+escudero_filled <- hourly_dates %>%
+  full_join(escudero, by = "date") %>%
+  arrange(date)  # Ensure data is sorted by date
+
+# Step 4: Filter for specific times and select desired columns
+times_to_keep <- c("00:00:00", "03:00:00", "06:00:00", "09:00:00", 
+                   "12:00:00", "15:00:00", "18:00:00", "21:00:00")
+
+escudero_3h <- escudero_filled %>%
+  filter(format(as.POSIXct(date), "%H:%M:%S") %in% times_to_keep) %>%
+  select(-station, -trace, -VRB_wind) %>%
+  rename(
+    temp = ts,
+    hr = humidity,
+    vel = speed
+  )
+
+# View the resulting data frame 
+head(escudero_3h)
+
     # O'higgins ----
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_ohiggins")
 
@@ -1410,8 +1440,8 @@ stations$distance <- distances / 1000 # Convert distances to kilometers and add 
 
     # Process weather station data and identify a study periods with less than 15 days of NAs per year ----
 
-#setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
-setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
+# setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
 
 # List all .csv files in the folder
 file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
@@ -1424,15 +1454,15 @@ names(data_frames) <- sub("\\.csv$", "", basename(file_list))
 
 data_frames <- lapply(data_frames, function(df) {
   df %>%
-    mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    select(!contains("skt")) %>%
-    select(!contains("prec"))
+    mutate(date = as.POSIXct(date, tz="UTC")) #%>%
+   # select(!contains("skt")) %>%
+   # select(!contains("prec"))
 })
 
 # Extract flag columns
 
 # Extract date and flag columns ( _ in header) 
-flag_dfs <- lapply(data_frames, function(df) {
+flags <- lapply(data_frames, function(df) {
   cols_to_extract <- c("date", grep("_", names(df), value = TRUE))   # Identify columns that contain "_" or are named "date"
   df_subset <- df[, cols_to_extract, drop = FALSE]   # Subset the data frame to include only these columns
   df_subset <- df_subset %>%
@@ -1448,8 +1478,8 @@ data_frames <- lapply(data_frames, function(df) {
     relocate(date, .before = everything())  # Move 'date' column to the first position
 })
 
-# Remove the 'kirkwood' data frame from flag_dfs list
-flag_dfs <- flag_dfs[!names(flag_dfs) %in% "palmer_flagged"]
+# Remove the 'kirkwood' data frame from flags list
+flags <- flags[!names(flags) %in% "palmer_flagged"]
 
 # Process files 15 NA days
 {ohiggins15 <- ohiggins_flagged %>%
@@ -1515,7 +1545,7 @@ df_list15 <- list(ohiggins15, carlini15, esperanza15, jci15, prat15, rothera15, 
 #df_list30 <- list(ohiggins30, carlini30, esperanza30, jci30, prat30, rothera30, sanmartin30, vernadsky30)
 
 # Combine all data frames by date and filter
-df <- flag_dfs %>%
+df <- flags %>%
   Reduce(function(x, y) full_join(x, y, by = "date"), .) %>%
   filter(if_all(-date, ~ . == 1))
 
@@ -1789,7 +1819,7 @@ for (name in names(era5land_list)) {
     write.csv(era5land_list[[name]], file = file_path, row.names = FALSE)
 }
 
-    # Extract study period from ERA5Land ----
+    # Extract study period from ERA5Land, extract obs. every 3 hours ----
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/processed_era5land")
 file_list <- list.files(pattern = "\\_era5land.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
 
