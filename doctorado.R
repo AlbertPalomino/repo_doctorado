@@ -7,6 +7,7 @@ library("gridExtra")
 library(dplyr) # For data manipulation
 library(lubridate) # For date-time functions
 library(stringr)
+library(ggplot2)
 
 # Processing penguin colony database ----
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration")
@@ -702,7 +703,7 @@ library(lubridate) # For date-time functions
 library(stringr)
 library(data.table)
 
-#setwd("/Volumes/Pengo2/Doctorado/data exploration")
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_palmer")
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_palmer")
 
 # Define the path to folder containing the .txt files
@@ -925,36 +926,27 @@ na_check <- sapply(df_list, function(df) any(is.na(df$V1)))
 na_dfs <- df_list[na_check] # Keep only the data frames that contain NA in V1
 
 
-# Palmer_clean_2019 ----
+    # Palmer_clean_2019 ----
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_palmer")
 
-palmer2019 <- read.csv("/Users/albert/Downloads/palmer_clean_2019.csv", sep = ",", header = TRUE)
+palmer2019 <- read.csv("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_palmer/palmer_clean_2019.csv", sep = ",", header = TRUE)
 palmer2019 <- palmer2019 %>%
   mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz = "UTC")) %>%
   mutate(across(2:11, as.numeric))
 
-palmer <- read.csv("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_palmer/palmer_3oct24.csv")
+palmer <- read.csv("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_palmer/palmer_3oct24.csv")
+palmer <- palmer %>%
+  mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz = "UTC")) %>%
+  mutate(across(2:11, as.numeric))
 
 names(palmer2019) <- names(palmer)
 palmer_complete <- rbind(palmer,palmer2019)
 
 write.csv(palmer_complete,"palmer_28dec24.csv", row.names = FALSE)
 
-# Palmer 2001-2015
-folder_path <- "/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_palmer"
-df <- read.delim("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_palmer/2001/December/ar011201.100", header = TRUE, skip = 1)
+    # Palmer 2001-2015 ----
+folder_path <- "/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_palmer"
 
-process_df <- function(df) {
-  df <- df %>%
-    mutate(date = as.POSIXct(paste(Date, Time, sep = " "), format = "%d/%m/%y %H:%M:%S", tz = "UTC")) %>%   # Convert date to a formatted string
-    select(date, everything())  %>%    # Reorder columns, date first
-    select(c(1,6,8,12,13,14,17,18,19)) %>%   # Drop the original time columns and unnecessary columns
-    mutate(across(2:9, as.numeric))    # Change class of numeric variables
-  return(df)
-}
-
-df <- process_df(df)
-
-# Find all .100 files in the folder and its subfolders
 file_list <- list.files(path = folder_path, pattern = "\\.100$", recursive = TRUE, full.names = TRUE)
 
 # Read each .100 file into a data frame and store in a list
@@ -962,25 +954,54 @@ df_list <- lapply(file_list, function(file) {
   read.delim(file, skip = 1, header = TRUE)
 })
 
-df_list <- lapply(df_list, function(df) {
+new_list <- lapply(df_list, function(df) {
   df <- df %>%
-    mutate(date = as.POSIXct(paste(Date, Time, sep = " "), format = "%d/%m/%y %H:%M:%S", tz = "UTC")) %>%   # Convert date to a formatted string
+    mutate(date = as.POSIXct(paste(Date, Time, sep = " "), format = "%y/%m/%d %H:%M:%S", tz = "UTC")) %>%   # Convert date to a formatted string
     select(date, everything())  %>%    # Reorder columns, date first
-    #select(c(1,4,5,6,8,12,13,14,17,18,19)) %>%   # Drop the original time columns and unnecessary columns
-    mutate(across(6:30, as.numeric))    # Change class of numeric variables
+    select(c(1,4,5,6,8,10,12,13,14,17,18,19)) %>%   # Drop the original time columns and unnecessary columns
+    mutate(across(4:11, as.numeric))    # Change class of numeric variables
   return(df)
 })
 
-combined_df <- bind_rows(df_list)
+# Standardize column names across all data frames in new_list
+col_names <- c("date", "Date", "Time", "vel", "dir", "gust_vel",	"temp",	"hr",	"dew", "pres", "snow_depth", "prec")
 
-names(combined_df) <- c("date",	"time", "ID", "vel", "dir",	"gust_vel",	"gust_dir",	"temp",	"hr",	"dew",	"pyranometer", "pres", "snow_depth", "prec",	"visibility",	"CBase1", "CBase2", "CBase3",	"vert_vis")
+new_list <- lapply(new_list, function(df) {
+  # Ensure the number of columns matches
+  if(ncol(df) == length(col_names)) {
+    colnames(df) <- col_names
+  } else {
+    warning("Skipping a dataframe with different column count")     # Handle the case where the number of columns is different (if needed)
+  }
+  return(df)
+})
 
+combined_df <- Reduce(rbind, new_list)
 
-# Assign file names (without extensions) as names of the list
-names(df_list) <- basename(file_list) %>% tools::file_path_sans_ext()
+# Remove rows where the date is NA
+combined_df <- combined_df %>% 
+  filter(!is.na(date)) %>%
+  mutate(date = floor_date(date, unit = "minute")) %>% # Set seconds to 00
+  mutate(gust_dir = NA) %>%
+  select(c(-Date,-Time))
 
-# Inspect the list of data frames
-str(df_list)
+# Join data frames from period 2001-15 and 2015-24
+palmer <- read.csv("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_palmer/palmer_28dec24.csv", sep = ",", header = TRUE)
+palmer <- palmer %>%
+  mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz = "UTC")) %>%
+  mutate(across(2:11, as.numeric))
+
+# Remove rows from combined_df where the date is in palmer
+filtered_combined_df <- combined_df %>%
+  filter(!date %in% palmer$date)
+
+# Bind the two data frames
+palmer_complete <- bind_rows(filtered_combined_df, palmer_complete)
+palmer_complete  <- palmer_complete2
+write.csv(palmer_complete,"/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_palmer/palmer_9jan25.csv", row.names = FALSE)
+
+# Remove anomalous observations
+
 # Vernadsky ----
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_vernadsky")
 
@@ -1477,6 +1498,35 @@ data_frames <- lapply(data_frames, function(df) {
     select(!contains("_")) %>%  # Select columns that do not contain "_"
     relocate(date, .before = everything())  # Move 'date' column to the first position
 })
+
+# Plot time series and flags
+df <- data_frames[[1]]
+
+library(ggplot2)
+library(dplyr)
+
+# Create a data frame with shading ranges based on shading_flag
+shading_ranges <- df %>%
+  mutate(is_shaded = temp_carlini == 1) %>%
+  group_by(group = cumsum(!is_shaded)) %>% # Group consecutive shaded regions
+  filter(is_shaded) %>%
+  summarize(
+    xmin = first(date),
+    xmax = last(date),
+    .groups = "drop"
+  )
+
+# Plot with shaded areas
+ggplot(df) +
+  geom_rect(
+    data = shading_ranges,
+    aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
+    fill = "green", alpha = 0.5
+  ) +
+  geom_line(aes(x = date, y = temp), color = "black", linewidth = 1) + # Temperature line
+  # geom_line(aes(x = date, y = temp_carlini), color = "red") + # Test line with 0/1 flags
+  labs(title = "Temperature in Carlini with Flagged Periods", x = "Date", y = "Temperature (°C)") +
+  theme_minimal()
 
 # Remove the 'kirkwood' data frame from flags list
 flags <- flags[!names(flags) %in% "palmer_flagged"]
