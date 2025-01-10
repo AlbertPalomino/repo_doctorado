@@ -1002,7 +1002,7 @@ write.csv(palmer_complete,"/media/ddonoso/Pengo2/Doctorado/data exploration/mete
 
 # Remove anomalous observations
 
-# Vernadsky ----
+    # Vernadsky ----
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/meteo_vernadsky")
 
 # Load necessary libraries
@@ -1459,20 +1459,20 @@ distances <- distHaversine(coords1, coords2)  # Distance in meters
 stations$distance <- distances / 1000 # Convert distances to kilometers and add as a new column
 
 
-    # Process weather station data and identify a study periods with less than 15 days of NAs per year ----
+# Identify study periods with less than 15 days of NAs per year ----
+
+    # Line plots of flags ----
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(scales)
 
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
 # setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
 
-# List all .csv files in the folder
 file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
-
-# Read each CSV file into a separate data frame
 data_frames <- lapply(file_list, read.csv)
-
-# Name each data frame based on the file name
 names(data_frames) <- sub("\\.csv$", "", basename(file_list))
-
 data_frames <- lapply(data_frames, function(df) {
   df %>%
     mutate(date = as.POSIXct(date, tz="UTC")) #%>%
@@ -1480,9 +1480,7 @@ data_frames <- lapply(data_frames, function(df) {
    # select(!contains("prec"))
 })
 
-# Extract flag columns
-
-# Extract date and flag columns ( _ in header) 
+# Extract flag columns and date
 flags <- lapply(data_frames, function(df) {
   cols_to_extract <- c("date", grep("_", names(df), value = TRUE))   # Identify columns that contain "_" or are named "date"
   df_subset <- df[, cols_to_extract, drop = FALSE]   # Subset the data frame to include only these columns
@@ -1492,20 +1490,57 @@ flags <- lapply(data_frames, function(df) {
   return(df_subset)
 })
 
-# Remove flag columns (with "_" in the header) from data_frames 
-data_frames <- lapply(data_frames, function(df) {
-  df %>%
-    select(!contains("_")) %>%  # Select columns that do not contain "_"
-    relocate(date, .before = everything())  # Move 'date' column to the first position
+# Function to create flag plot
+plot_flags <- function(df_long, plot_title) {
+  ggplot(df_long, aes(x = date, y = variable, colour = factor(value))) +
+    geom_point() +
+    labs(title = plot_title, x = "", y = "") +
+    theme_minimal() +
+    scale_color_manual(values = c("0" = "black", "1" = "red")) +
+    scale_x_datetime(
+      #breaks = "1 year",  # Set breaks at 1-year intervals
+      labels = date_format("%Y")) + # Show only the year in labels
+    guides(colour = guide_legend(title = "Valid periods (red)"))
+}
+
+# Create a vector of names
+df_names <- c("Carlini", "Dismal Island", "Escudero", "Esperanza", "Fossil Bluff", "Gabriel  de Castilla", "Hugo Island", "Juan Carlos I", "King Sejong", "Kirkwood Island", "O'Higgins", "Palmer", "Prat", "Racer Rock", "Rothera", "San Martin", "Vernadsky")
+
+# Loop through data frame list 'flags' using their position
+for (i in seq_along(flags)) {
+  # Get the current data frame
+  df_long <- flags[[i]]  %>%
+    pivot_longer(cols = -date, names_to = "variable", values_to = "value")
+  plot_title <- df_names[i]
+  plot <- plot_flags(df_long, plot_title)
+  png(filename = paste0(plot_title, ".png"), width = 3000, height = 1000, res = 300)
+  print(plot)
+  dev.off()
+}
+
+names(plots) <- names(flags)
+
+# Display all plots
+for (plot in plots) {
+  print(plot)
+}
+
+# Save each plot as a separate file
+lapply(plots, function(x) {
+  ggsave(
+    filename = paste0(x, "_valid_periods.png"),
+    plot = plots[[x]],
+    width = 10,
+    height = 10,
+    dpi = 300
+  )
 })
 
-# Plot time series and flags
+    # Plot meteo time series with valid periods as shaded areas ----
+
 df <- data_frames[[1]]
 
-library(ggplot2)
-library(dplyr)
-
-# Create a data frame with shading ranges based on shading_flag
+# Create a df with shading ranges based on a flag column
 shading_ranges <- df %>%
   mutate(is_shaded = temp_carlini == 1) %>%
   group_by(group = cumsum(!is_shaded)) %>% # Group consecutive shaded regions
@@ -1516,7 +1551,7 @@ shading_ranges <- df %>%
     .groups = "drop"
   )
 
-# Plot with shaded areas
+# Plot raw meteo data with valid periods as shaded areas 
 ggplot(df) +
   geom_rect(
     data = shading_ranges,
@@ -1527,9 +1562,6 @@ ggplot(df) +
   # geom_line(aes(x = date, y = temp_carlini), color = "red") + # Test line with 0/1 flags
   labs(title = "Temperature in Carlini with Flagged Periods", x = "Date", y = "Temperature (°C)") +
   theme_minimal()
-
-# Remove the 'kirkwood' data frame from flags list
-flags <- flags[!names(flags) %in% "palmer_flagged"]
 
 # Process files 15 NA days
 {ohiggins15 <- ohiggins_flagged %>%
