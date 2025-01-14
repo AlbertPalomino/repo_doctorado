@@ -1,13 +1,14 @@
 # Load necessary libraries
 detach("package:stats", unload = TRUE)
-library ("tidyverse")
-library ("fastDummies")
-library("rjson")
-library("gridExtra")
+library (tidyverse)
+library (fastDummies)
+library(rjson)
+library(gridExtra)
 library(dplyr) # For data manipulation
 library(lubridate) # For date-time functions
 library(stringr)
 library(ggplot2)
+library(stats)
 
 # Processing penguin colony database ----
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration")
@@ -1403,7 +1404,7 @@ df$date <- as.character(df$date)
 # Save the dataframe to a .csv file
 write.csv(df, "kirkwood.csv", row.names = FALSE)
 
-# Stations and nearest grid point in ERA5-Land ----
+# Plot meteo stations and nearest grid points ----
 setwd("/media/donoso/Pengo2/Doctorado/datos_netcdf_rema/era5land")
 library(mapdata)
 library(rgdal)
@@ -1475,9 +1476,9 @@ data_frames <- lapply(file_list, read.csv)
 names(data_frames) <- sub("\\.csv$", "", basename(file_list))
 data_frames <- lapply(data_frames, function(df) {
   df %>%
-    mutate(date = as.POSIXct(date, tz="UTC")) #%>%
-   # select(!contains("skt")) %>%
-   # select(!contains("prec"))
+    mutate(date = as.POSIXct(date, tz="UTC")) %>%
+    select(!contains("skt")) %>% # Remove both the data and the flag columns
+    select(!contains("prec"))
 })
 
 # Extract flag columns and date
@@ -1496,11 +1497,11 @@ plot_flags <- function(df_long, plot_title) {
     geom_point() +
     labs(title = plot_title, x = "", y = "") +
     theme_minimal() +
-    scale_color_manual(values = c("0" = "black", "1" = "red")) +
+    scale_color_manual(values = c("0" = "black", "1" = "darkolivegreen4")) +
     scale_x_datetime(
       #breaks = "1 year",  # Set breaks at 1-year intervals
       labels = date_format("%Y")) + # Show only the year in labels
-    guides(colour = guide_legend(title = "Valid periods (red)"))
+    guides(colour = guide_legend(title = "Valid periods (green)"))
 }
 
 # Create a vector of names
@@ -1537,8 +1538,11 @@ lapply(plots, function(x) {
 })
 
     # Plot meteo time series with valid periods as shaded areas ----
+for (i in seq_along(combined_list)) {
 
-df <- data_frames[[1]]
+  for (j in seq_along()) {
+    
+  df <- data_frames[[i]]
 
 # Create a df with shading ranges based on a flag column
 shading_ranges <- df %>%
@@ -1552,7 +1556,7 @@ shading_ranges <- df %>%
   )
 
 # Plot raw meteo data with valid periods as shaded areas 
-ggplot(df) +
+plot <- ggplot(df) +
   geom_rect(
     data = shading_ranges,
     aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
@@ -1560,8 +1564,13 @@ ggplot(df) +
   ) +
   geom_line(aes(x = date, y = temp), color = "black", linewidth = 1) + # Temperature line
   # geom_line(aes(x = date, y = temp_carlini), color = "red") + # Test line with 0/1 flags
-  labs(title = "Temperature in Carlini with Flagged Periods", x = "Date", y = "Temperature (°C)") +
+  labs(title = paste0("Temperature in",df_names[i],"with flagged periods"), x = "Date", y = "Temperature (°C)") +
   theme_minimal()
+
+  }
+  
+  }
+
 
 # Process files 15 NA days
 {ohiggins15 <- ohiggins_flagged %>%
