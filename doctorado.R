@@ -1460,26 +1460,109 @@ distances <- distHaversine(coords1, coords2)  # Distance in meters
 stations$distance <- distances / 1000 # Convert distances to kilometers and add as a new column
 
 
-# Identify study periods with less than 15 days of NAs per year ----
+# Process meteo time series ----
+
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
+
+file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
+data_frames <- lapply(file_list, read.csv)
+names(data_frames) <- sub("\\.csv$", "", basename(file_list))
+remove_cols <- c("skt", "prec", "dew", "velracha", "dirracha", "gustvel", "gustdir", "value", "trace")
+
+data_frames <- lapply(data_frames, function(df) {
+  df <- df %>%
+    mutate(date = as.POSIXct(date, tz="UTC")) %>%
+    select(-any_of(remove_cols))
+  return(df)
+})
+
+data_frames <- lapply(data_frames, function(df) {
+ if ("ts" %in% names(df)) {
+    df <- df %>% rename(temp = ts,
+                        temp_escudero = ts_escudero)
+   }
+ if ("speed" %in% names(df)) {
+    df <- df %>% rename(vel = speed,
+                        vel_escudero = speed_escudero)
+   }
+  return(df)
+})
+
+# Reorder columns based on the order specified
+data_frames <- lapply(data_frames, function(df) {
+  col_order <- c("date", "temp", "pres", "hr", "vel", "dir")
+  df <- df[, c(intersect(col_order, names(df)), setdiff(names(df), col_order))]
+  return(df)
+})
+
+# Transform necessary variables, remove wrong values
+
+df_names <- c("sanmartin", "esperanza", "carlini") # Wind speed and direction from Argentinian stations
+data_frames[df_names] <- lapply(data_frames[df_names], function(df) {
+  df$dir <- df$dir * 10   # transform wind direction deca to degrees
+  df$vel <- df$vel / 3.6  # transform wind speed from km/h to m/s
+  return(df)
+})
+
+data_frames <- lapply(data_frames, function(df) { # Remove wind directions > 360
+  df <- df %>%
+    mutate(dir = ifelse(dir > 360, NA, dir))
+  return(df)
+})
+
+data_frames <- lapply(data_frames, function(df) { # Remove pres < 900
+  df <- df %>%
+    mutate(pres = ifelse(pres < 900, NA, pres))
+  return(df)
+})
+
+df_names <- c("escudero", "ohiggins", "prat", "rothera") # Transform wind speed from knots to m/s
+data_frames[df_names] <- lapply(data_frames[df_names], function(df) {
+  df$vel <- df$vel  * 0.514444
+  return(df)
+})
+
+data_frames <- lapply(data_frames, function(df) { # Remove Relative Humidity > 100
+  if ("hr" %in% names(df)) {
+    df <- df %>%
+      mutate(hr = ifelse(hr > 100, NA, hr))
+  }
+  return(df)
+})
+
+# Check temperature  and hr failure in Palmer
+df <- data_frames$palmer
+subset_df <- df[df$date >= as.Date("2010-05-30") & df$date <= as.Date("2010-10-15"), ]
+plot(subset_df$date, subset_df$temp) 
+
+data_frames$palmer <- data_frames$palmer %>%
+  mutate(temp = ifelse(date >= as.Date("2010-05-30") & date <= as.Date("2010-10-15"), NA, temp))
+
+df <- data_frames$palmer
+subset_df <- df[df$date >= as.Date("2010-09-07") & df$date <= as.Date("2010-10-13"), ]
+plot(subset_df$date, subset_df$hr) 
+
+data_frames$palmer <- data_frames$palmer %>%
+  mutate(hr = ifelse(date >= as.Date("2010-09-07") & date <= as.Date("2010-10-13"), NA, hr))
+
+df <- data_frames$palmer
+subset_df <- df[df$date >= as.Date("2024-06-11") & df$date <= as.Date("2024-07-01"), ]
+plot(subset_df$date, subset_df$hr) 
+
+data_frames$palmer <- data_frames$palmer %>%
+  mutate(hr = ifelse(date >= as.Date("2024-06-11") & date <= as.Date("2024-07-01"), NA, hr))
+
+# Export modified files
+for (name in names(data_frames)) {
+  file_path <- paste0("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_edit/", name, ".csv")
+  write.csv(data_frames[name], file = file_path, row.names = FALSE)
+}
 
     # Line plots of flags ----
 library(ggplot2)
 library(tidyr)
 library(dplyr)
 library(scales)
-
-setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
-# setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
-
-file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
-data_frames <- lapply(file_list, read.csv)
-names(data_frames) <- sub("\\.csv$", "", basename(file_list))
-data_frames <- lapply(data_frames, function(df) {
-  df %>%
-    mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    select(!contains("skt")) %>% # Remove both the data and the flag columns
-    select(!contains("prec"))
-})
 
 # Extract flag columns and date
 flags <- lapply(data_frames, function(df) {
@@ -1537,40 +1620,88 @@ lapply(plots, function(x) {
   )
 })
 
-    # Plot meteo time series with valid periods as shaded areas ----
-for (i in seq_along(combined_list)) {
+    # Plot time series with shaded areas ----
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(grid)
 
-  for (j in seq_along()) {
-    
+# Create a list to store all plots
+df_names <- c("Carlini", "Dismal Island", "Escudero", "Esperanza", "Fossil Bluff", "Gabriel  de Castilla", "Hugo Island", "Juan Carlos I", "King Sejong", "Kirkwood Island", "O'Higgins", "Palmer", "Prat", "Racer Rock", "Rothera", "San Martin", "Vernadsky")
+
+
+# Iterate through each data frame in the data_frames
+for (i in seq_along(data_frames)) {
   df <- data_frames[[i]]
-
-# Create a df with shading ranges based on a flag column
-shading_ranges <- df %>%
-  mutate(is_shaded = temp_carlini == 1) %>%
-  group_by(group = cumsum(!is_shaded)) %>% # Group consecutive shaded regions
-  filter(is_shaded) %>%
-  summarize(
-    xmin = first(date),
-    xmax = last(date),
-    .groups = "drop"
-  )
-
-# Plot raw meteo data with valid periods as shaded areas 
-plot <- ggplot(df) +
-  geom_rect(
-    data = shading_ranges,
-    aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
-    fill = "green", alpha = 0.5
-  ) +
-  geom_line(aes(x = date, y = temp), color = "black", linewidth = 1) + # Temperature line
-  # geom_line(aes(x = date, y = temp_carlini), color = "red") + # Test line with 0/1 flags
-  labs(title = paste0("Temperature in",df_names[i],"with flagged periods"), x = "Date", y = "Temperature (°C)") +
-  theme_minimal()
-
+  df_name <- names(data_frames)[i]
+  df_title <- df_names[i]
+  
+  # Identify valid columns (exclude 'date' and columns with '_')
+  valid_columns <- names(df)[!grepl("_", names(df)) & names(df) != "date"]
+  
+  # List to store plots for the current data frame
+  plot_list <- list()
+  
+  # Iterate through valid columns
+  for (j in seq_along(valid_columns)) {
+    col_name <- valid_columns[j]
+    col_flag <- grep(paste0("^", col_name, "_"), names(df), value = TRUE)
+    
+    # Create shading ranges based on the flag column
+    shading_ranges <- df %>%
+      mutate(is_shaded = !!sym(col_flag) == 1) %>%
+      group_by(group = cumsum(!is_shaded)) %>%
+      dplyr::filter(is_shaded) %>%
+      summarize(
+        xmin = first(date),
+        xmax = last(date),
+        .groups = "drop"
+      )
+    
+    # Calculate mean and sd and add them to time series plot
+    #col_mean <- mean(df[[col_name]], na.rm = TRUE)
+    #col_sd <- sd(df[[col_name]], na.rm = TRUE)
+    
+    # Plot raw meteo data with valid periods as shaded areas
+    plot <- ggplot(df) +
+      geom_rect(
+        data = shading_ranges,
+        aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
+        fill = "darkolivegreen3", alpha = 0.5
+      ) +
+      geom_line(aes(x = date, y = .data[[col_name]]), color = "black", linewidth = 0.5) +
+      #  geom_hline(yintercept = col_mean, color = "red", linewidth = 0.5) +
+      #  geom_hline(yintercept = col_mean + 3*col_sd, color = "red", linewidth = 0.5) +
+      #  geom_hline(yintercept = col_mean - 3*col_sd, color = "red", linewidth = 0.5) +
+      labs(
+        title = "",
+        x = "",
+        y = col_name
+      ) +
+      theme_minimal()
+    
+    # Store the plot in the list
+    plot_list[[j]] <- plot
   }
   
-  }
+  # Export plots for the current data frame
+  combined_plot <- grid.arrange(
+    grobs = c(
+      list(textGrob(
+        paste0(df_title, " time series"),
+        gp = gpar(fontsize = 12, fontface = "bold"),
+        just = "center")), plot_list),
+    ncol = 1,
+    heights = c(1, rep(10, length(plot_list))) # Adjust heights: 1 for title, 10 for each plot
+  )
+  
+  png(filename = paste0(df_title, "_timeseries.png"), width = 3000, height = 3000, res = 300)
+  grid.draw(combined_plot) 
+  dev.off()  
+  
+}
 
+    # Identify study periods with less than 15 days of NAs per year ----
 
 # Process files 15 NA days
 {ohiggins15 <- ohiggins_flagged %>%

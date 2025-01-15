@@ -6,7 +6,7 @@ library(grid)
 # Create a list to store all plots
 df_names <- c("Carlini", "Dismal Island", "Escudero", "Esperanza", "Fossil Bluff", "Gabriel  de Castilla", "Hugo Island", "Juan Carlos I", "King Sejong", "Kirkwood Island", "O'Higgins", "Palmer", "Prat", "Racer Rock", "Rothera", "San Martin", "Vernadsky")
 
-i = 1
+
 # Iterate through each data frame in the data_frames
 for (i in seq_along(data_frames)) {
   df <- data_frames[[i]]
@@ -23,17 +23,21 @@ for (i in seq_along(data_frames)) {
   for (j in seq_along(valid_columns)) {
     col_name <- valid_columns[j]
     col_flag <- grep(paste0("^", col_name, "_"), names(df), value = TRUE)
-    
+
     # Create shading ranges based on the flag column
     shading_ranges <- df %>%
       mutate(is_shaded = !!sym(col_flag) == 1) %>%
       group_by(group = cumsum(!is_shaded)) %>%
-      filter(is_shaded) %>%
+      dplyr::filter(is_shaded) %>%
       summarize(
         xmin = first(date),
         xmax = last(date),
         .groups = "drop"
       )
+    
+    # Calculate mean and sd and add them to time series plot
+    #col_mean <- mean(df[[col_name]], na.rm = TRUE)
+    #col_sd <- sd(df[[col_name]], na.rm = TRUE)
     
     # Plot raw meteo data with valid periods as shaded areas
     plot <- ggplot(df) +
@@ -43,6 +47,9 @@ for (i in seq_along(data_frames)) {
         fill = "darkolivegreen3", alpha = 0.5
       ) +
       geom_line(aes(x = date, y = .data[[col_name]]), color = "black", linewidth = 0.5) +
+    #  geom_hline(yintercept = col_mean, color = "red", linewidth = 0.5) +
+    #  geom_hline(yintercept = col_mean + 3*col_sd, color = "red", linewidth = 0.5) +
+    #  geom_hline(yintercept = col_mean - 3*col_sd, color = "red", linewidth = 0.5) +
       labs(
         title = "",
         x = "",
@@ -68,4 +75,5 @@ combined_plot <- grid.arrange(
 png(filename = paste0(df_title, "_timeseries.png"), width = 3000, height = 3000, res = 300)
 grid.draw(combined_plot) 
 dev.off()  
+
 }
