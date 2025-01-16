@@ -1023,7 +1023,7 @@ df <- df %>%
 
 process_df <- function(df) {
   df <- df %>%
-    # Convert columns to character type if needed
+    # Convert columns to character
     mutate(across(everything(), as.character)) %>%
     # Convert time to a formatted string
     mutate(
@@ -1261,15 +1261,10 @@ df <- df %>%
 
 process_df <- function(df) {
   df <- df %>%
-    
-    # Convert columns to character type if needed
-    #mutate(across(everything(), as.character)) %>%
-    
     # Convert time to a formatted string
     mutate(
       minute = "00",
       datetime = as.POSIXct(paste(yyyy, mm, dd, hh, minute, sep = "-"), format = "%Y-%m-%d-%H-%M", tz = "UTC")) %>%
-    
     # Drop the original time columns
     select(-yyyy, -mm, -dd, -hh, -minute) %>%
     select(datetime, everything())
@@ -1472,7 +1467,8 @@ remove_cols <- c("skt", "prec", "dew", "velracha", "dirracha", "gustvel", "gustd
 data_frames <- lapply(data_frames, function(df) {
   df <- df %>%
     mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    select(-any_of(remove_cols))
+    select(-matches(paste(remove_cols, collapse = "|"))) # Remove columns that match any pattern in remove_cols
+    #select(-any_of(remove_cols))
   return(df)
 })
 
@@ -1553,9 +1549,12 @@ data_frames$palmer <- data_frames$palmer %>%
   mutate(hr = ifelse(date >= as.Date("2024-06-11") & date <= as.Date("2024-07-01"), NA, hr))
 
 # Export modified files
+output_directory <- "/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_edit"
+
 for (name in names(data_frames)) {
-  file_path <- paste0("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_edit/", name, ".csv")
-  write.csv(data_frames[name], file = file_path, row.names = FALSE)
+  data_frames[[name]]$date <- format(data_frames[[name]]$date, "%Y-%m-%d %H:%M:%S")
+  file_path <- file.path(output_directory, paste0(name, ".csv"))
+  write.csv(data_frames[[name]], file = file_path, row.names = FALSE)
 }
 
     # Line plots of flags ----
@@ -1625,6 +1624,22 @@ library(ggplot2)
 library(dplyr)
 library(gridExtra)
 library(grid)
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flagged_jan")
+
+file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
+data_frames <- lapply(file_list, read.csv)
+names(data_frames) <- sub("\\_flagged.csv$", "", basename(file_list))
+
+data_frames <- lapply(data_frames, function(df) {
+  names(df) <- sub(".*\\.", "", names(df)) # Rename columns to remove everything before the dot
+  return(df)
+})
+
+data_frames <- lapply(data_frames, function(df) {
+  df <- df %>%
+    mutate(date = as.POSIXct(date))
+  return(df)
+})
 
 # Create a list to store all plots
 df_names <- c("Carlini", "Dismal Island", "Escudero", "Esperanza", "Fossil Bluff", "Gabriel  de Castilla", "Hugo Island", "Juan Carlos I", "King Sejong", "Kirkwood Island", "O'Higgins", "Palmer", "Prat", "Racer Rock", "Rothera", "San Martin", "Vernadsky")
@@ -1662,22 +1677,15 @@ for (i in seq_along(data_frames)) {
     #col_mean <- mean(df[[col_name]], na.rm = TRUE)
     #col_sd <- sd(df[[col_name]], na.rm = TRUE)
     
+    df_filtered <- df[!is.na(df[[col_name]]), ]
+    
+     #df_filtered <- df %>% mutate(group = cumsum(is.na(.data[[col_name]]) & lag(!is.na(.data[[col_name]]), default = FALSE)))
+    
     # Plot raw meteo data with valid periods as shaded areas
-    plot <- ggplot(df) +
-      geom_rect(
-        data = shading_ranges,
-        aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
-        fill = "darkolivegreen3", alpha = 0.5
-      ) +
+    plot <- ggplot(df_filtered) +
+      geom_rect(data = shading_ranges, aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf), fill = "darkolivegreen3", alpha = 0.5) +
       geom_line(aes(x = date, y = .data[[col_name]]), color = "black", linewidth = 0.5) +
-      #  geom_hline(yintercept = col_mean, color = "red", linewidth = 0.5) +
-      #  geom_hline(yintercept = col_mean + 3*col_sd, color = "red", linewidth = 0.5) +
-      #  geom_hline(yintercept = col_mean - 3*col_sd, color = "red", linewidth = 0.5) +
-      labs(
-        title = "",
-        x = "",
-        y = col_name
-      ) +
+      labs(title = "", x = "", y = col_name) +
       theme_minimal()
     
     # Store the plot in the list
@@ -1766,10 +1774,14 @@ vernadsky30 <- vernadsky_flagged %>%
 df_list15 <- list(ohiggins15, carlini15, esperanza15, jci15, prat15, rothera15, sanmartin15, vernadsky15)
 #df_list30 <- list(ohiggins30, carlini30, esperanza30, jci30, prat30, rothera30, sanmartin30, vernadsky30)
 
+# remove stations
+remove <- c("dismal", "kirkwood", "racer", "hugo", "gdc")
+flags <- flags[!names(flags) %in% remove]
+
 # Combine all data frames by date and filter
 df <- flags %>%
   Reduce(function(x, y) full_join(x, y, by = "date"), .) %>%
-  filter(if_all(-date, ~ . == 1))
+  dplyr::filter(if_all(-date, ~ . == 1))
 
 # Identify the full sequence of dates without gaps
 full_dates <- seq(min(df$date), max(df$date), by = "3 hours")
@@ -1783,8 +1795,35 @@ periods <- df %>%
   mutate(gap = c(0, diff(as.numeric(date)) != 3 * 3600),  # Identify gaps of 3 hours
          group = cumsum(gap)) %>%
   group_by(group) %>%
-  filter(all(!date %in% missing_dates)) %>%  # Keep groups without missing dates
+  dplyr::filter(all(!date %in% missing_dates)) %>%  # Keep groups without missing dates
   summarise(start = min(date), end = max(date), .groups = 'drop')
+
+periods <- periods %>%
+  mutate(ymin = 0, 
+         ymax = 1)
+
+plot <- ggplot(periods) +
+  geom_segment(
+    aes(x = start, xend = end, y = 0.5, yend = 0.5), # Horizontal line at y = 0.5
+    color = "darkolivegreen3",
+    size = 10
+  ) +
+  labs(
+    title = "Validation Periods",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank()
+  ) +
+  scale_y_continuous(expand = c(0, 0)) # Keep y-axis minimal
+
+png(filename = "valid_periods.png", width = 2000, height = 500, res = 300)
+grid.draw(plot) 
+dev.off()  
 
     # Extract study period from weather stations ----
 {ohiggins <- ohiggins_flagged %>%
@@ -2040,6 +2079,45 @@ for (name in names(era5land_list)) {
   file_path <- file.path(output_directory, paste0(name, "_era5land.csv"))
     write.csv(era5land_list[[name]], file = file_path, row.names = FALSE)
 }
+
+    # Process ERA5 ----
+
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5")
+file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
+
+era5land_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+
+new_column_names <- c("u10", "v10", "dew", "temp", "skt", "snowc", "sde", "sf", "pres", "prec", "date")
+era5land_list <- map(era5land_list, ~ setNames(.x, new_column_names)) # Rename columns in each data frame
+
+names(era5land_list) <- sub("\\.csv$", "", basename(file_list)) # Name each data frame based on the file name
+
+era5land_list <- lapply(era5land_list, function(df) {
+  df <- df %>%
+    mutate(across(everything(), as.numeric))  # Convert all columns to numeric
+  return(df)
+})
+
+# Convert Julian hours in the date column for each data frame
+era5land_list <- lapply(era5land_list, function(df) {
+  df %>%
+    mutate(date = as_datetime(date * 3600, origin = as.POSIXct("1900-01-01 00:00:00", tz = "UTC"), tz = "UTC"))
+})
+
+# Convert columns 3, 4, and 5 from Kelvin to Celsius for each data frame
+era5land_list_celsius <- lapply(era5land_list, function(df) {
+  df %>%
+    mutate(across(3:5, ~ . - 273.15))  # Convert columns 3, 4, and 5 from Kelvin to Celsius
+})
+
+# Transform u and v to wind speed and direction for each data frame
+era5land_list_wind <- lapply(era5land_list_celsius, function(df) {
+  df %>%
+    mutate(
+      vel10 = sqrt(u10^2 + v10^2),  # Calculate wind speed
+      dir = (atan2(v10, u10) * (180 / pi)) %% 360  # Calculate wind direction in degrees
+    )
+})
 
     # Extract study period from ERA5Land, extract obs. every 3 hours ----
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/processed_era5land")
