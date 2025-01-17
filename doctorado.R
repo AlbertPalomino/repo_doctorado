@@ -8,6 +8,7 @@ library(dplyr) # For data manipulation
 library(lubridate) # For date-time functions
 library(stringr)
 library(ggplot2)
+library(purrr)
 library(stats)
 
 # Processing penguin colony database ----
@@ -1455,7 +1456,7 @@ distances <- distHaversine(coords1, coords2)  # Distance in meters
 stations$distance <- distances / 1000 # Convert distances to kilometers and add as a new column
 
 
-# Process meteo time series ----
+# Process meteo time series (remove extra columns and outliers) ----
 
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_3h_tolerance15")
 
@@ -1467,8 +1468,7 @@ remove_cols <- c("skt", "prec", "dew", "velracha", "dirracha", "gustvel", "gustd
 data_frames <- lapply(data_frames, function(df) {
   df <- df %>%
     mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    select(-matches(paste(remove_cols, collapse = "|"))) # Remove columns that match any pattern in remove_cols
-    #select(-any_of(remove_cols))
+    select(-matches(paste(remove_cols, collapse = "|"))) # Remove columns that match any pattern in remove_cols, to include flag columns
   return(df)
 })
 
@@ -1557,11 +1557,26 @@ for (name in names(data_frames)) {
   write.csv(data_frames[[name]], file = file_path, row.names = FALSE)
 }
 
-    # Line plots of flags ----
-library(ggplot2)
-library(tidyr)
-library(dplyr)
-library(scales)
+# Identify study periods with less than 15 days of NAs per year ----
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flagged_jan")
+
+file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
+data_frames <- lapply(file_list, read.csv)
+names(data_frames) <- sub("\\_flagged.csv$", "", basename(file_list))
+
+data_frames <- lapply(data_frames, function(df) {
+  names(df) <- sub(".*\\.", "", names(df)) # Rename columns to remove everything before the dot
+  return(df)
+})
+
+remove_cols <- c("skt", "prec", "dew", "velracha", "dirracha", "gustvel", "gustdir", "value", "trace")
+data_frames <- lapply(data_frames, function(df) {
+  df <- df %>%
+    mutate(date = as.POSIXct(date, tz="UTC")) %>%
+    select(-matches(paste(remove_cols, collapse = "|"))) # Remove columns that match any pattern in remove_cols, to include flag columns
+  return(df)
+})
+
 
 # Extract flag columns and date
 flags <- lapply(data_frames, function(df) {
@@ -1572,6 +1587,12 @@ flags <- lapply(data_frames, function(df) {
   names(df_subset) <- gsub("_.*$", "", names(df_subset))   # Remove suffix from headers
   return(df_subset)
 })
+
+    # Line plots of flags ----
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(scales)
 
 # Function to create flag plot
 plot_flags <- function(df_long, plot_title) {
@@ -1624,28 +1645,11 @@ library(ggplot2)
 library(dplyr)
 library(gridExtra)
 library(grid)
-setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flagged_jan")
 
-file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
-data_frames <- lapply(file_list, read.csv)
-names(data_frames) <- sub("\\_flagged.csv$", "", basename(file_list))
 
-data_frames <- lapply(data_frames, function(df) {
-  names(df) <- sub(".*\\.", "", names(df)) # Rename columns to remove everything before the dot
-  return(df)
-})
-
-data_frames <- lapply(data_frames, function(df) {
-  df <- df %>%
-    mutate(date = as.POSIXct(date))
-  return(df)
-})
-
-# Create a list to store all plots
 df_names <- c("Carlini", "Dismal Island", "Escudero", "Esperanza", "Fossil Bluff", "Gabriel  de Castilla", "Hugo Island", "Juan Carlos I", "King Sejong", "Kirkwood Island", "O'Higgins", "Palmer", "Prat", "Racer Rock", "Rothera", "San Martin", "Vernadsky")
 
-
-# Iterate through each data frame in the data_frames
+# Iterate through each df in data_frames list
 for (i in seq_along(data_frames)) {
   df <- data_frames[[i]]
   df_name <- names(data_frames)[i]
@@ -1679,8 +1683,6 @@ for (i in seq_along(data_frames)) {
     
     df_filtered <- df[!is.na(df[[col_name]]), ]
     
-     #df_filtered <- df %>% mutate(group = cumsum(is.na(.data[[col_name]]) & lag(!is.na(.data[[col_name]]), default = FALSE)))
-    
     # Plot raw meteo data with valid periods as shaded areas
     plot <- ggplot(df_filtered) +
       geom_rect(data = shading_ranges, aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf), fill = "darkolivegreen3", alpha = 0.5) +
@@ -1709,8 +1711,9 @@ for (i in seq_along(data_frames)) {
   
 }
 
-    # Identify study periods with less than 15 days of NAs per year ----
+    # Identify study periods ----
 
+# Create a list of data frames
 # Process files 15 NA days
 {ohiggins15 <- ohiggins_flagged %>%
   select(-c(2:7,)) %>%
@@ -1770,11 +1773,10 @@ vernadsky30 <- vernadsky_flagged %>%
   select(-prec_vernadsky)
 }
 
-# Create a list of data frames
-df_list15 <- list(ohiggins15, carlini15, esperanza15, jci15, prat15, rothera15, sanmartin15, vernadsky15)
-#df_list30 <- list(ohiggins30, carlini30, esperanza30, jci30, prat30, rothera30, sanmartin30, vernadsky30)
+# df_list15 <- list(ohiggins15, carlini15, esperanza15, jci15, prat15, rothera15, sanmartin15, vernadsky15)
+# df_list30 <- list(ohiggins30, carlini30, esperanza30, jci30, prat30, rothera30, sanmartin30, vernadsky30)
 
-# remove stations
+# Remove stations with incomplete records
 remove <- c("dismal", "kirkwood", "racer", "hugo", "gdc")
 flags <- flags[!names(flags) %in% remove]
 
@@ -1804,15 +1806,10 @@ periods <- periods %>%
 
 plot <- ggplot(periods) +
   geom_segment(
-    aes(x = start, xend = end, y = 0.5, yend = 0.5), # Horizontal line at y = 0.5
-    color = "darkolivegreen3",
-    size = 10
-  ) +
+    aes(x = start, xend = end, y = 0.5, yend = 0.5), # Horizontal line at y = 0.5 
+    color = "darkolivegreen3", linewidth = 10) +
   labs(
-    title = "Validation Periods",
-    x = "",
-    y = ""
-  ) +
+    title = "Validation Periods", x = "", y = "") +
   theme_minimal() +
   theme(
     axis.text.y = element_blank(),
@@ -1826,6 +1823,36 @@ grid.draw(plot)
 dev.off()  
 
     # Extract study period from weather stations ----
+
+data_frames <- lapply(data_frames, function(df) { # Remove flag columns
+  df <- df %>%
+    dplyr::select(-dplyr::contains("_")) 
+})
+
+# Remove stations with incomplete records
+remove <- c("dismal", "kirkwood", "racer", "hugo", "gdc")
+data_frames <- data_frames[!names(data_frames) %in% remove]
+
+
+period1 <- lapply(data_frames, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, tz="UTC")) %>%
+    dplyr::filter(date >= as.POSIXct("2013-10-11 15:00:00") & date < as.POSIXct("2014-11-30 03:00:00"))
+})
+
+period2 <- lapply(data_frames, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, tz="UTC")) %>%
+    dplyr::filter(date >= as.POSIXct("2017-07-27 22:00:00") & date < as.POSIXct("2019-05-15 22:00:00"))
+})
+
+period3 <- lapply(data_frames, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, tz="UTC")) %>%
+    dplyr::filter(date >= as.POSIXct("2021-06-07 19:00:00") & date < as.POSIXct("2022-09-23 00:00:00"))
+})
+
+
 {ohiggins <- ohiggins_flagged %>%
   select(-c(8:13,)) %>%
   select(-prec)
@@ -1938,7 +1965,7 @@ file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = FALS
 era5land_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
 
 new_column_names <- c("u10", "v10", "dew", "temp", "skt", "snowc", "sde", "sf", "pres", "prec", "date")
-era5land_list <- map(era5land_list, ~ setNames(.x, new_column_names)) # Rename columns in each data frame
+era5land_list <- lapply(era5land_list, function(df) setNames(df, new_column_names))
 
 names(era5land_list) <- sub("\\.csv$", "", basename(file_list)) # Name each data frame based on the file name
 
@@ -2085,29 +2112,30 @@ for (name in names(era5land_list)) {
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5")
 file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
 
-era5land_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+era5 <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
 
-new_column_names <- c("u10", "v10", "dew", "temp", "skt", "snowc", "sde", "sf", "pres", "prec", "date")
-era5land_list <- map(era5land_list, ~ setNames(.x, new_column_names)) # Rename columns in each data frame
+col_names <- c("u10", "v10", "dew", "temp", "pres", "prec", "gust", "snowfall", "date")
 
-names(era5land_list) <- sub("\\.csv$", "", basename(file_list)) # Name each data frame based on the file name
+era5 <- map(era5, ~ setNames(.x, col_names)) # Rename columns in each data frame
 
-era5land_list <- lapply(era5land_list, function(df) {
+names(era5) <- gsub("^datos|\\.csv$", "", basename(file_list)) # Name each data frame based on the file name
+
+era5 <- lapply(era5, function(df) {
   df <- df %>%
     mutate(across(everything(), as.numeric))  # Convert all columns to numeric
   return(df)
 })
 
 # Convert Julian hours in the date column for each data frame
-era5land_list <- lapply(era5land_list, function(df) {
+era5_date <- lapply(era5, function(df) {
   df %>%
     mutate(date = as_datetime(date * 3600, origin = as.POSIXct("1900-01-01 00:00:00", tz = "UTC"), tz = "UTC"))
 })
 
 # Convert columns 3, 4, and 5 from Kelvin to Celsius for each data frame
-era5land_list_celsius <- lapply(era5land_list, function(df) {
+era5_celsius <- lapply(era5, function(df) {
   df %>%
-    mutate(across(3:5, ~ . - 273.15))  # Convert columns 3, 4, and 5 from Kelvin to Celsius
+    mutate(across(3:4, ~ . - 273.15))  # Convert columns 3, 4, and 5 from Kelvin to Celsius
 })
 
 # Transform u and v to wind speed and direction for each data frame
