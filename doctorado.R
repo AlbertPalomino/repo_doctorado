@@ -10,6 +10,8 @@ library(stringr)
 library(ggplot2)
 library(purrr)
 library(stats)
+library(humidity)
+library(ecmwfr)
 
 # Processing penguin colony database ----
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration")
@@ -269,7 +271,7 @@ m1<- ggplot(data = col10, aes(x = longitude, y = latitude)) +
             ylim = c(-68, -61), xlim = c(-67, -54))
 m1
 
-ggplot() +  
+ggplot() +
 geom_polygon(data=shp.df, aes(x=long, y=lat, group=group), alpha= 0.6) +
   coord_map(project="stereographic", orientation=c(-90,-60,0),
             ylim = c(-68, -61), xlim = c(-67, -54))
@@ -279,7 +281,6 @@ geom_polygon(data=shp.df, aes(x=long, y=lat, group=group), alpha= 0.6) +
   geom_point(aes(size = adelie), color = "green", alpha = 0.2, show.legend = TRUE) +
   scale_size_continuous(range = c(1, 10)) +
   geom_point(aes(color = no_count), size = 0.7, show.legend = FALSE)
-
 
 
     # Data on most visited locations ----
@@ -2110,6 +2111,8 @@ for (name in names(era5land_list)) {
     # Process ERA5 ----
 
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5")
+setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/era5")
+
 file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
 
 era5 <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
@@ -2129,23 +2132,104 @@ era5 <- lapply(era5, function(df) {
 # Convert Julian hours in the date column for each data frame
 era5_date <- lapply(era5, function(df) {
   df %>%
-    mutate(date = as_datetime(date * 3600, origin = as.POSIXct("1900-01-01 00:00:00", tz = "UTC"), tz = "UTC"))
+    mutate(date = as_datetime(date, origin = as.POSIXct("1970-01-01 00:00:00", tz = "UTC"), tz = "UTC")) %>%
+    select(date, everything())
 })
 
 # Convert columns 3, 4, and 5 from Kelvin to Celsius for each data frame
-era5_celsius <- lapply(era5, function(df) {
+era5_celsius <- lapply(era5_date, function(df) {
   df %>%
-    mutate(across(3:4, ~ . - 273.15))  # Convert columns 3, 4, and 5 from Kelvin to Celsius
+    mutate(across(4:5, ~ . - 273.15))  # Convert columns 3, 4, and 5 from Kelvin to Celsius
 })
 
 # Transform u and v to wind speed and direction for each data frame
-era5land_list_wind <- lapply(era5land_list_celsius, function(df) {
+era5_wind <- lapply(era5_celsius, function(df) {
   df %>%
     mutate(
       vel10 = sqrt(u10^2 + v10^2),  # Calculate wind speed
       dir = (atan2(v10, u10) * (180 / pi)) %% 360  # Calculate wind direction in degrees
     )
 })
+
+# Calculate wind speed at 3m based on a logarithmic attenuation
+era5_vel3 <- lapply(era5_wind, function(df) {
+  
+  # Vector to store the value at x = 3 for each row
+  df$vel <- NA
+  
+  # Iterate through each row to calculate the value at x = 3
+  for (i in 1:nrow(df)) {
+    y2 <- df$vel10[i]  # Get the vel value for the current row
+    x1 <- 0.0001
+    y1 <- 0
+    x2 <- 10
+    
+    # Calculate the coefficients a and c based on the current y2
+    a <- (y2 - y1) / (log(x2) - log(x1))
+    c <- y1 - a * log(x1)
+    
+    # Define the logarithmic function
+    log_function <- function(x) {
+      a * log(x) + c
+    }
+    
+    # Calculate the value at x = 3 for the current row
+    df$vel[i] <- log_function(3)
+  }
+  return(df)
+})
+
+
+# Temperature correction using temperature environmental vertical lapse rate of 6.5 C/km
+file_path= "/Volumes/Pengo2/Doctorado/datos_netcdf_rema/era5land/station_locations.csv"
+df <- read.csv(file_path, sep = ",", header = TRUE)
+df$elev_station <- c(8, 45, 10, 5, 12, 70, 15, 10, 25, 17, 10, 25, 7, 12, 5, 93, 4, 63, 30) # Elevation of weather stations
+df$elev_diff <- df$elev - df$elev_station
+df$temp_diff <- (df$elev_diff) / 1000 * 6.5
+temp_diff <- df$temp_diff[c(6,3,14,2,9,1,18,7,12,16,5,19,8,11,4,10,17,15,13)]
+elev_diff <- df$elev_diff[c(6,3,14,2,9,1,18,7,12,16,5,19,8,11,4,10,17,15,13)]
+coords <- df
+
+# Correct temperature in era5land data
+era5_temp <- lapply(seq_along(era5_vel3), function(i) {
+  era5_vel3[[i]] %>%
+    rename(
+      old_temp = temp,
+      old_dew = dew) %>%
+    mutate(
+      temp = old_temp + temp_diff[i],
+      dew = old_dew + temp_diff[i])
+})
+
+# Calculate relative humidity
+era5_hr <- lapply(era5_temp, function(df) {
+  df %>%
+    mutate(hr = RH(old_temp, old_dew, isK = FALSE))
+})
+
+# Adjust pressure for each dataframe in the list
+era5_list <- lapply(seq_along(era5_hr), function(i) {
+  P0 <- 101325  # Pa
+  g <- 9.81     # m/s²
+  M <- 0.029    # kg/mol
+  R <- 8.314    # J/(mol·K)
+  T <- era5_hr[[i]]$old_temp + 273.15 # degrees Kelvin
+  delta_h <- elev_diff[i]
+  delta_P <- P0 * (g * M / (R * T)) * delta_h  # Calculate delta_P for each station's elevation difference 
+  
+  era5_hr[[i]] %>%
+    rename(old_pres = pres) %>% 
+    mutate(pres = as.numeric(old_pres) + delta_P) %>% 
+    mutate(pres = pres / 100)  # Convert resulting pressure back to hPa
+})
+
+# Rename and save each dataframe in the list as CSV
+  #names(era5) <- gsub("^datos|\\.csv$", "", basename(file_list))
+output_directory <- "/Volumes/Pengo2/Doctorado/data exploration/meteo/era5/processed"
+for (name in names(era5_vel3)) {
+  file_path <- file.path(output_directory, paste0(name, ".csv"))
+  write.csv(era5_vel3[[name]], file = file_path, row.names = FALSE)
+}
 
     # Extract study period from ERA5Land, extract obs. every 3 hours ----
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land/processed_era5land")

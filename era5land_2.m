@@ -18,10 +18,13 @@ lon = ncread (ncfile, 'longitude');
 csvfile = "/home/ddonoso/Desktop/DoctoradoDefinitivo/station_locations.csv";
 points = readtable(csvfile);
 
-variables = {'u10','v10','d2m','t2m','msl','tp','i10fg','sf'}; %editar según nombre de era5
+variables = {'u10','v10','d2m','t2m','msl','tp','i10fg','sf'}; % editar según nombre de era5
 time_series_data = cell(1, numel(variables));
 
-nan_info = true(61,43); % 2D array with 0 or 1, representing NaN or non-NaNs in ncfile. MODIFICAR LAS DIMENSIONES DE LA GRILLA
+
+% CREATE MASK WITH EMPTY CELLS (NaN)
+
+nan_info = true(61,43); % modify according to grid size.
 u10 = ncread(ncfile,'u10');
 for i = 1:43
     for j = 1:61
@@ -32,13 +35,14 @@ for i = 1:43
 end
 clear u10  i j
 
-imagesc(nan_info'); % plots cells with and without data in data.nc, transposing x and y axes
+imagesc(nan_info'); % plots cells data.nc showing data and NAs. ' transposes x and y axes
 
 new_lon = x.* nan_info'; % applydata = ncread(ncfile, variables{i}); nan_info mask to x and y
 new_lat = y.* nan_info';
 figure,plot(new_lon, new_lat,'*')
 
-% FOR WEATHER STATIONS INSTEAD OF COLONIES
+
+% EXTRACT COORDS FOR NEAREST GRID POINT
 %
 colonies = [];
 for i = 1:size(points,1)
@@ -63,6 +67,8 @@ for i = 1:size(points,1)
 end
 
 
+% BUILD TIME SERIES FOR EACH STATION BY CONCATENATING NC FILES
+
 folderPath = '/home/ddonoso/Desktop/datos_Albert/era5'
 
 for i = 1:size(colonies, 1)
@@ -80,7 +86,7 @@ for i = 1:size(colonies, 1)
             
             data_at_coord = squeeze(ncread(ncfile, variables{j}, [idx, idy, 1], [1 , 1, Inf]));
             
-            var_series = [var_series; data_at_coord]; % ';' añade data_at_coord debajo de obs anteriores. ',' las añade en nueva columna
+            var_series = [var_series; data_at_coord]; % ';' añade data_at_coord debajo de obs anteriores y ',' las añade en nueva columna
             
             time = ncread(ncfile, 'valid_time');
             time_series = [time_series; time];
