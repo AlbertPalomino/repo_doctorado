@@ -1844,8 +1844,8 @@ period1 <- lapply(data_frames, function(df) {
 period2 <- lapply(data_frames, function(df) {
   df %>%
     mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    dplyr::filter(date >= as.POSIXct("2017-07-27 22:00:00") & date < as.POSIXct("2019-05-15 22:00:00"))
-})
+    dplyr::filter(date >= as.POSIXct("2017-10-10 12:00:00") & date < as.POSIXct("2019-05-15 22:00:00"))
+}) # instead of valid period starting at "2017-07-27 22:00:00", start at 2017101012 because of AMPS grid type
 
 period3 <- lapply(data_frames, function(df) {
   df %>%
@@ -2113,26 +2113,25 @@ for (name in names(era5land_list)) {
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5")
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/era5")
 
-file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
+file_list <- list.files(pattern = "^datos.*\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
 
 era5 <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
 
 col_names <- c("u10", "v10", "dew", "temp", "pres", "prec", "gust", "snowfall", "date")
-
 era5 <- map(era5, ~ setNames(.x, col_names)) # Rename columns in each data frame
 
-names(era5) <- gsub("^datos|\\.csv$", "", basename(file_list)) # Name each data frame based on the file name
+names(era5) <- gsub("^datos_|\\.csv$", "", basename(file_list)) # Name each data frame based on the file name
 
-era5 <- lapply(era5, function(df) {
+# era5 <- lapply(era5, function(df) {
   df <- df %>%
     mutate(across(everything(), as.numeric))  # Convert all columns to numeric
   return(df)
 })
 
-# Convert Julian hours in the date column for each data frame
+# Convert Julian date in the date column for each data frame - hour in seconds since 1970-01-01 00:00:00
 era5_date <- lapply(era5, function(df) {
   df %>%
-    mutate(date = as_datetime(date, origin = as.POSIXct("1970-01-01 00:00:00", tz = "UTC"), tz = "UTC")) %>%
+    mutate(date = as_datetime(date, origin = "1970-01-01", tz = "UTC")) %>%
     select(date, everything())
 })
 
