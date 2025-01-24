@@ -11,7 +11,7 @@ library(ggplot2)
 library(purrr)
 library(stats)
 library(humidity)
-library(ecmwfr)
+#library(ecmwfr)
 
 # Processing penguin colony database ----
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration")

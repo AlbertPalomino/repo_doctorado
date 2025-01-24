@@ -167,7 +167,7 @@ m_plot(table2array(stations(:,5)),table2array(stations(:,4)),'.k','markersize',1
 m_plot(table2array(stations(:,3)),table2array(stations(:,2)),'.r','markersize',11)
 
 plot(var_series(:, 3), var_series(:, 1), '-o');
-plot(combined_var_series{1}{:, 9}, combined_var_series{1}{:, 7}, '-o');
+plot(combined_var_series{1}(:, 3), var_series(:, 1), '-o');
 
  var_list{i}.var3
 datetick('x', 'yyyy-mm-dd HH:MM', 'keepticks');
