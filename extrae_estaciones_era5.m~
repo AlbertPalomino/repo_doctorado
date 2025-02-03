@@ -2,14 +2,18 @@ clear all; close all; clc
 %%% ULTIMA ACTUALIZACION 2024-12-04 18:00:00
 
 cd /home/ddonoso/Desktop/datos_Albert/era5/downloads
+%cd /home/ddonoso/Desktop/datos_Albert/era5
+
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/era5/'))
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/'))
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/funciones_matlab/m_map1.4/m_map'))
 
 folder = '/home/ddonoso/Desktop/datos_Albert/era5/downloads/';
+%folder = '/home/ddonoso/Desktop/datos_Albert/era5/';
 
-%file_list = dir(fullfile(folder, '*instant*.nc'));
+file_list = dir(fullfile(folder, '*instant*.nc'));
 file_list = dir(fullfile(folder, '*accum*.nc'));
+%file_list = dir(fullfile(folder, '*.nc'));
 
 ncfile = file_list(1).name;
 ncdisp(ncfile) % read info in file
@@ -22,23 +26,24 @@ lon = ncread (ncfile, 'longitude');
 csvfile = "/home/ddonoso/Desktop/repo_doctorado/station_locations.csv";
 points = readtable(csvfile);
 
-%variables = {'u10','v10','d2m','t2m','msl','i10fg'}; %variables in ERA5
-variables = {'tp','sf'};
+%variables = {'u10','v10','d2m','t2m','msl','tp','i10fg','sf'}; %variables in ERA5
+variables = {'u10','v10','d2m','t2m','msl','i10fg'}; %variables in ERA5
+variables =  {'tp','sf'};
 
 time_series_data = cell(1, numel(variables));
 
 % CREATE MASK WITH EXISTING GRID POINTS
 
 nan_info = true(61,43); % 2D array with 0 or 1, representing NaN or non-NaNs in ncfile. MODIFICAR LAS DIMENSIONES DE LA GRILLA
-u10 = ncread(ncfile,'u10');
+var = ncread(ncfile,'u10');
 for i = 1:43
     for j = 1:61
-        if any(isnan(u10(j, i, :)))
+        if any(isnan(var(j, i, :)))
             nan_info(j, i) = false;
         end
     end
 end
-clear u10  i j
+clear var i j
 
 imagesc(nan_info'); % plots cells with and without data in data.nc, transposing x and y axes
 
@@ -125,13 +130,13 @@ for i = 1:size(stations, 1)
         var_series = [var_series, cat_var_series];
         
     end
-    var_series = [var_series, cat_time_series];
-    var_series = array2table(var_series);
+    var_series2 = [var_series, double(cat_time_series)];
+    var_table = array2table(var_series2);
     
-    %var_series.Properties.VariableNames = {'u10','v10','dew','temp','pres','gust','date'}; % Rename the columns
+    %var_table.Properties.VariableNames = {'u10','v10','dew','temp','pres','gust','date'}; % Rename the columns
     var_series.Properties.VariableNames = {'prec','snowfall','date'}; % Rename the columns
 
-    var_list2{i} = var_series;  % Store each table in a cell array
+    var_list2{i} = var_table;  % Store each table in a cell array
     
     %fn = sprintf ('%s/era5_%s.csv', folderPath, string(stations.Var1(i)));
     %writetable(var_series, fn);
@@ -167,7 +172,7 @@ m_plot(table2array(stations(:,5)),table2array(stations(:,4)),'.k','markersize',1
 m_plot(table2array(stations(:,3)),table2array(stations(:,2)),'.r','markersize',11)
 
 plot(var_series(:, 3), var_series(:, 1), '-o');
-plot(combined_var_series{1}(:, 3), var_series(:, 1), '-o');
+plot(combined_var_series{1}{:, 9}, combined_var_series{1}{:, 7}, '-o');
 
  var_list{i}.var3
 datetick('x', 'yyyy-mm-dd HH:MM', 'keepticks');
