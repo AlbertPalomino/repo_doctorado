@@ -1402,7 +1402,7 @@ df$date <- as.character(df$date)
 write.csv(df, "kirkwood.csv", row.names = FALSE)
 
 # Plot meteo stations and nearest grid points ----
-setwd("/media/donoso/Pengo2/Doctorado/datos_netcdf_rema/era5land")
+setwd("/media/ddonoso/KINGSTON")
 library(mapdata)
 library(rgdal)
 library(ggmap)
@@ -1410,30 +1410,97 @@ library(raster)
 library(mapproj)
 library(sf)
 library(ggplot2)
+library(ggrepel)
+# Load the raster file
+tif_file <- "/home/ddonoso/Desktop/datos_Albert/output_GEBCOIceTopo.tif"
+r <- raster(tif_file)
 
-#shp_file <- "/Volumes/Pengo2/Doctorado/data exploration/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp"
-shp_file <- "/Volumes/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp"
-shp <- st_read(shp_file)
-shp.df <- as_Spatial(shp)
+# Convert to a data frame for ggplot
+r_df <- as.data.frame(r, xy = TRUE)
+# Rename the raster value column (optional)
+names(r_df)[3] <- "value"  # Assuming a single-band raster
 
-# Read weather station and ERA5-Land coordinates
-stations <- read.csv("station_locations.csv", sep = ",", header = TRUE)
+coastline <- st_read("/home/ddonoso/Desktop/datos_Albert/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp")
+#coastline <- st_read("/media/ddonoso/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp")
+coastline <- st_transform(coastline, crs = 4326)
+bbox <- st_bbox(c(xmin = -70, ymin = -73, xmax = -50, ymax = -61), crs = 4326)
+bbox_sf <- st_as_sfc(bbox)  # Convert bbox to spatial object
+coastline_crop <- st_crop(coastline, bbox_sf)
 
+#shp_file <- "/home/ddonoso/Desktop/datos_Albert/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp"
+#shp_file <- "/Volumes/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp"
+shp <- st_read(coastline_crop)
+shp.df <- as_Spatial(coastline_crop)
+
+# Read weather stations and grid points
+stations <- read.csv("all_coords_long.csv", sep = ",", header = TRUE)
+stations_filtered <- stations %>%
+  dplyr::filter(dataset == "station")
+stations_filtered1 <- stations_filtered %>%
+  dplyr::filter(lat > -64)
+
+stations$station_type <- recode(stations$dataset, 
+                                     station = "Weather Stations", 
+                                     era5land = "ERA5 Land", 
+                                     era5 = "ERA5", 
+                                     racmo5.5 = "RACMO 5.5km", 
+                                     racmo11 = "RACMO 11km")
 # Plot
-m1<- ggplot() +  
-  geom_polygon(data=shp.df, aes(x=long, y=lat, group=group), alpha= 0.6) +
-  coord_map(project="stereographic", orientation=c(-90,-60,0),
-            ylim = c(-72, -62), xlim = c(-70, -55)) +
-  geom_point(data=stations, aes(x=target_long, y=target_lat), color="black",size=0.5) +
-  geom_point(data = stations, aes(x = nearest_lon, y = nearest_lat), color = "red", size = 0.5, alpha = 0.5) +
-  geom_text(data = stations, aes(x = target_long, y = target_lat, label = location), 
-            vjust = -1, color = "black", size = 4) + 
-  #theme(panel.background = element_rect(fill = "black"), panel.grid.major = element_line(colour = "white", linetype = "dotted")) +
-  labs(x = "", y = "", title = "Weather stations (black) and ERA5-Land grid points (red)")
+m1 <- ggplot() +  
+  geom_raster(data = r_df, aes(x = x, y = y, fill = value)) +
+  scale_fill_gradientn(colors = c("#36648B","#4F94CD", "#AFEEEE","#8B7E66", "#2F4F4F","white", "black"), 
+                       values = scales::rescale(c(-5000, -200, 0, 1, 500, 1000, 2500)),
+                       guide = "none") +
+ 
+  #coord_cartesian(ylim = c(-72, -62), xlim = c(-70, -55)) +
+  coord_sf(crs = st_crs(r)) + 
+  geom_point(data = stations, aes(x = long, y = lat, color = station_type), size = 0.5) +
+  geom_text_repel(data= stations_filtered, aes(x = long, y = lat, label = station), box.padding = 0.5, point.padding = 0.3) +
+  xlim(-76,-54) +
+  ylim(-72,-61) +
+  scale_color_manual(name = "", 
+                     values = c("Weather Stations" = "black", 
+                                "ERA5 Land" = "tomato", 
+                                "ERA5" = "darkolivegreen3", 
+                                "RACMO 5.5km" = "plum3", 
+                                "RACMO 11km" = "gold"),
+                     guide = guide_legend(order = 1)) +
+  theme(panel.background = element_blank(), 
+        panel.grid.major = element_line(colour = scales::alpha("white", 0.2)),
+        panel.grid.minor = element_blank(),
+        panel.ontop = TRUE) +
+  labs(x = "", y = "")
+
 m1
 
-ggsave("ws_peninsula.png", plot = m1, width = 8, height = 8, dpi = 300)
-ggsave("ws_fossilbluff.png", plot = m1, width = 8, height = 8, dpi = 300)
+ggsave("peninsula.png", plot = m1, width = 8, height = 8, dpi = 300)
+
+m2 <- ggplot() +  
+  geom_raster(data = r_df, aes(x = x, y = y, fill = value)) +
+  scale_fill_gradientn(colors = c("#36648B","#4F94CD", "#AFEEEE","#8B7E66", "#2F4F4F","white", "black"), 
+                       values = scales::rescale(c(-5000, -331, -330, 0, 100, 500, 2500)),
+                       guide = "none") +
+  geom_sf(data = coastline_crop, color = "black", fill = "grey", size = 0.05 ,alpha = 0) +
+  #coord_cartesian(ylim = c(-72, -62), xlim = c(-70, -55)) +
+  coord_sf(crs = st_crs(r), xlim = c(-62,-56.5), ylim = c(-63.6,-61.8)) + 
+  geom_point(data = stations, aes(x = long, y = lat, color = station_type), size = 1) +
+  geom_text_repel(data= stations_filtered1, aes(x = long, y = lat, label = station), box.padding = 1, point.padding = 0.3) +
+  scale_color_manual(name = "", 
+                     values = c("Weather Stations" = "black", 
+                                "ERA5 Land" = "tomato", 
+                                "ERA5" = "darkolivegreen3", 
+                                "RACMO 5.5km" = "plum3", 
+                                "RACMO 11km" = "gold"),
+                     guide = guide_legend(order = 1)) +
+  theme(panel.background = element_blank(), 
+        panel.grid.major = element_line(colour = scales::alpha("white", 0.2)),
+        panel.grid.minor = element_blank(),
+        panel.ontop = TRUE) +
+  labs(x = "", y = "")
+
+m2
+
+ggsave("shetlands.png", plot = m2, width = 8, height = 8, dpi = 300)
 
 m2<- ggplot() +  
   geom_polygon(data=shp.df, aes(x=long, y=lat, group=group), alpha= 0.6) +
