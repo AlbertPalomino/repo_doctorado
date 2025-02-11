@@ -100,8 +100,7 @@ for i = 20%1:size(stations, 1)
             data_at_coord = squeeze(ncread(ncfile, variables{j}, [idx, idy, 1], [1 , 1, Inf]));
             cat_var_series = [cat_var_series; data_at_coord]; % ; añade data_at_coord debajo de obs anteriores/ , las añade en nueva columna
             
-            %time = ncread(ncfile, 'valid_time');
-            time = ncread(ncfile, 'time');
+            time = ncread(ncfile, 'valid_time');
             
             % era5land seconds since 1900-01-01
             %n = datenum(1900,01,01,0,0,double(time));
@@ -129,9 +128,7 @@ for i = 20%1:size(stations, 1)
             
 end                      
 
-
-% Plot tests to check if data is correctly extracted
-
+% Check if data is correctly extracted
 plot(var_series2(:, 8), var_series2(:, 7), '-o');
 
 % Plot map with colonies and nearest ERA5Land coords

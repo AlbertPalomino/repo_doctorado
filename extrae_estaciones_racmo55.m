@@ -10,10 +10,7 @@ addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/funciones_matlab
 folder = '/media/ddonoso/KINGSTON/racmo5.5/';
 
 file_list1 = dir(fullfile(folder, '*2011*.nc'));
-%file_list2 = dir(fullfile(folder, '*2021*.nc'));
-%file_lists = {file_list1, file_list2}; % Store both lists in a cell array
 
-%ncfile = file_lists{1}(1).name; 
 ncfile = file_list1(1).name; 
 ncdisp(ncfile)
 
@@ -50,8 +47,6 @@ for i = 1:size(points,1)
 end
 
 % Save station and grid point coordinates as csv
-% folder = '/media/ddonoso/KINGSTON/racmo11'; % Create new path if necessary
-
 fn = sprintf ('%s/coords.csv', folder);
 writetable(stations, fn);
 
@@ -73,7 +68,6 @@ var_list = {}; % Cell array to store tables for each iteration
 
     var_series = [];
               
-%       for k = 1:length(current_list)
         for k = 1:length(file_list1)
             
             ncfile = file_list1(k).name;
@@ -81,21 +75,19 @@ var_list = {}; % Cell array to store tables for each iteration
             var_names = {info.Variables.Name}; % Extract variable names
             last_var = var_names{end}; % Get the last variable name
 
-            variable_k = squeeze(ncread(ncfile, last_var, [idx, idy, 1, 1], [1, 1, 1, Inf]));            
-                       
+            variable_k = squeeze(ncread(ncfile, last_var, [idx, idy, 1, 1], [1, 1, 1, Inf]));
             var_series = [var_series, variable_k];
-
-%            [i,j,k]
             [j,k]
 
         end
         
         time = ncread(ncfile, 'time');
+        
         var_series2 = [var_series, double(time)];
         
         var_table = array2table(var_series2);
         
-        var_table.Properties.VariableNames = {'vel','gust','prec','hr','runoff','snowfall','snowmelt','temp','u10','v10','date'}; % Rename the columns
+        var_table.Properties.VariableNames = {'vel','gust','pres','prec','surfpres','hr','snowfall','temp','u10','v10','date'}; % Rename the columns, pres being mean sea level pressure
         
         var_list{j} = var_table;  % Store each table in a cell array
 
@@ -138,11 +130,11 @@ m_plot(table2array(stations(:,3)),table2array(stations(:,2)),'.k','markersize',1
 
 % Plot tests - visualise time series
 
-first_table = var_list{16};
+first_table = var_list{20};
 
 first_table.GregorianDate = datetime(1950, 1, 1, 0, 0, 0) + days(first_table{:, 11});
 
-plot(first_table{:, 12}, first_table{:, 1}, '-o');
+plot(first_table{:, 12}, first_table{:, 7}, '-o');
 
 %ylabel('u10 (m/s)');
 %title('Time Series Plot');

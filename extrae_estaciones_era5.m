@@ -1,15 +1,14 @@
 clear all; close all; clc
 %%% ULTIMA ACTUALIZACION 2024-12-04 18:00:00
 
-cd /home/ddonoso/Desktop/datos_Albert/era5/downloads
+cd /media/ddonoso/KINGSTON/era5
 %cd /home/ddonoso/Desktop/datos_Albert/era5
 
-addpath(genpath('/home/ddonoso/Desktop/datos_Albert/era5/'))
+addpath(genpath('/media/ddonoso/KINGSTON/era5'))
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/'))
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/funciones_matlab/m_map1.4/m_map'))
 
-folder = '/home/ddonoso/Desktop/datos_Albert/era5/downloads/';
-%folder = '/home/ddonoso/Desktop/datos_Albert/era5/';
+folder = '/media/ddonoso/KINGSTON/era5/';
 
 file_list = dir(fullfile(folder, '*instant*.nc'));
 file_list = dir(fullfile(folder, '*accum*.nc'));
@@ -35,7 +34,7 @@ time_series_data = cell(1, numel(variables));
 % CREATE MASK WITH EXISTING GRID POINTS
 
 nan_info = true(61,43); % 2D array with 0 or 1, representing NaN or non-NaNs in ncfile. MODIFICAR LAS DIMENSIONES DE LA GRILLA
-var = ncread(ncfile,'u10');
+var = ncread(ncfile,'tp');
 for i = 1:43
     for j = 1:61
         if any(isnan(var(j, i, :)))
@@ -75,7 +74,7 @@ for i = 1:size(points,1)
     
 end
 
-folderPath = '/home/ddonoso/Desktop/datos_Albert/era5/downloads/';
+folderPath = '/media/ddonoso/KINGSTON/era5/';
 
 % Save station and era5 coordinates as csv
     fn = sprintf ('%s/coords.csv', folderPath);
@@ -133,10 +132,11 @@ for i = 1:size(stations, 1)
     var_series2 = [var_series, double(cat_time_series)];
     var_table = array2table(var_series2);
     
-    %var_table.Properties.VariableNames = {'u10','v10','dew','temp','pres','gust','date'}; % Rename the columns
-    var_table.Properties.VariableNames = {'prec','snowfall','date'}; % Rename the columns
+    var_table.Properties.VariableNames = {'u10','v10','dew','temp','pres','gust','date'}; % Rename columns
+    %var_table.Properties.VariableNames = {'prec','snowfall','date'};
 
-    var_list2{i} = var_table;  % Store each table in a cell array
+    var_list1{i} = var_table;  % Store each table in a cell array
+    %var_list2{i} = var_table;
     
     %fn = sprintf ('%s/era5_%s.csv', folderPath, string(stations.Var1(i)));
     %writetable(var_series, fn);
@@ -174,7 +174,7 @@ m_plot(table2array(stations(:,5)),table2array(stations(:,4)),'.k','markersize',1
 m_plot(table2array(stations(:,3)),table2array(stations(:,2)),'.r','markersize',11)
 
 plot(var_series(:, 3), var_series(:, 1), '-o');
-plot(combined_var_series{1}{:, 9}, combined_var_series{1}{:, 7}, '-o');
+plot(combined_var_series{20}{:, 9}, combined_var_series{20}{:,8}, '-o');
 
  var_list{i}.var3
 datetick('x', 'yyyy-mm-dd HH:MM', 'keepticks');

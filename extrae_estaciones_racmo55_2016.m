@@ -1,15 +1,15 @@
 clear all; close all; clc
 %%% ULTIMA ACTUALIZACION 4 febrero 2025
 
-cd /media/ddonoso/KINGSTON/racmo11
+cd /media/ddonoso/KINGSTON/racmo5.5_2016
 
-addpath(genpath('/media/ddonoso/KINGSTON/racmo11/'))
+addpath(genpath('/media/ddonoso/KINGSTON/racmo5.5_2016/'))
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/'))
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/funciones_matlab/m_map1.4/m_map'))
 
-folder = '/media/ddonoso/KINGSTON/racmo11/';
+folder = '/media/ddonoso/KINGSTON/racmo5.5_2016/';
 
-file_list1 = dir(fullfile(folder, '*2011*.nc'));
+file_list1 = dir(fullfile(folder, '*2016*.nc'));
 file_list2 = dir(fullfile(folder, '*2021*.nc'));
 file_lists = {file_list1, file_list2}; % Store both lists in a cell array
 
@@ -18,6 +18,7 @@ ncdisp(ncfile)
 
 
 % FIND NEAREST GRID POINT TO EACH STATION
+% Same coordinates as for RACMO5.5
 
 lat = ncread(ncfile, 'lat');
 lon = ncread (ncfile, 'lon');
@@ -51,7 +52,7 @@ end
 % Save station and grid point coordinates as csv
 % folder = '/media/ddonoso/KINGSTON/racmo11'; % Create new path if necessary
 
-fn = sprintf ('%s/coords.csv', folder);
+fn = sprintf ('%s/coords_racmo2016.csv', folder);
 writetable(stations, fn);
 
 
@@ -65,7 +66,7 @@ for i = 1:2
 current_list = file_lists{i} % Select a file list
     
    
-    for j = 1:size(stations, 1)
+    for j = 20%1:size(stations, 1)
 
     idx = stations.idx(j);
     idy = stations.idy(j);
@@ -92,7 +93,7 @@ current_list = file_lists{i} % Select a file list
         
         var_table = array2table(var_series2);
         
-        var_table.Properties.VariableNames = {'hr','prec','surfpres','pres','snowfall','gust','temp','u10','v10','date'}; % Rename the columns, pres refers to mean sea lvel pressure
+        var_table.Properties.VariableNames = {'vel','gust','pres','prec','surfpres','rh','snowfall','temp','u10','v10','date'}; % Rename the columns, pres refers to mean sea lvel pressure
         
         var_list{j} = var_table;  % Store each table in a cell array
 
@@ -112,7 +113,7 @@ var_list2 = var_list_struct.var_list2;
 
 concat_list = cell(size(var_list1));
 
-for i = 1:length(var_list1)
+for i = 20%1:length(var_list1)
     
     concat_table = [var_list1{i}; var_list2{i}]; 
     
@@ -145,8 +146,9 @@ m_plot(table2array(stations(:,3)),table2array(stations(:,2)),'.k','markersize',1
 
 % Plot tests - visualise time series
 first_table = concat_list{20};
-first_table.GregorianDate = datetime(1950, 1, 1, 0, 0, 0) + days(first_table{:, 10});
-plot(first_table{:, 11}, first_table{:, 1}, '-o');
+first_table.GregorianDate = datetime(1950, 1, 1, 0, 0, 0) + days(first_table{:, 11});
+
+plot(first_table{:, 12}, first_table{:, 10}, '-o');
 
 datetick('x', 'yyyy-mm-dd HH:MM', 'keepticks');
 ylabel('u10 (m/s)');

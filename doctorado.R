@@ -1361,6 +1361,26 @@ df$date <- format(df$date, "%Y-%m-%d %H:%M:%S")
 
 write.csv(df, "rothera2025.csv", row.names = FALSE)
 
+    # not necessary anymore - Rewrite Rothera with new data  ----
+process_df <- function(df) {
+  df <- df %>%
+    # Convert time to a formatted string
+    mutate(date = as.POSIXct(paste(year, month, day, hour, min, sep = "-"), format = "%Y-%m-%d-%H-%M", tz = "UTC")) %>%
+    # Reorder columns, date first
+    select(date, everything())  %>% 
+    # Change ckass of numeric variables
+    mutate(across(6:11, as.numeric)) %>%
+    mutate(vel = vel * 0.514444) %>% # Transform wind speed from knots to m/s
+    select(-c(2:6))
+  return(df)
+}
+df1 <- read.delim("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_rothera/rothera_validation.txt", sep = "", header = TRUE, dec = ".")
+df1 <- process_df(df1)
+stations[[6]] <- merge(df1, stations[[6]], by = "date", all.y = TRUE, suffixes = c("_df1", ""))
+stations[[6]] <- stations[[6]][, !names(stations[[6]]) %in% c("dir", "vel", "temp", "pres", "hr", "dew")]
+names(stations[[6]]) <- sub("_df1$", "", names(stations[[6]]))
+
+
     # Kirkwood ----
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/")
 
@@ -1411,96 +1431,116 @@ library(mapproj)
 library(sf)
 library(ggplot2)
 library(ggrepel)
+library(scales)
+library(ggnewscale)
+library(paletteer)
+library(palettetown)
+
+# Load GECBO 2024 file
+tif_file <- "/home/ddonoso/Desktop/datos_Albert/GEBCO_07_Feb_2025_770c5c4fd7a7/gebco_2023_n-60.0_s-73.0_w-80.0_e-50.0.tif"
+tif_file <- "/home/ddonoso/Desktop/datos_Albert/GEBCO_07_Feb_2025_7573fb81841c/gebco_2024_sub_ice_n-60.0_s-73.0_w-80.0_e-50.0.tif"
+tif_file <- "/home/ddonoso/Desktop/datos_Albert/GEBCO_07_Feb_2025_cc46e7ea3ce9/south_polar_2024_306627_1894737_-3065297_-1386786.tif"
+r <- raster(tif_file)
+r <- projectRaster(r, crs = "+proj=longlat +datum=WGS84", method = "bilinear")
+r_df <- as.data.frame(r, xy = TRUE)
+names(r_df)[3] <- "value"
+
+
 # Load the raster file
 tif_file <- "/home/ddonoso/Desktop/datos_Albert/output_GEBCOIceTopo.tif"
-r <- raster(tif_file)
 
-# Convert to a data frame for ggplot
-r_df <- as.data.frame(r, xy = TRUE)
-# Rename the raster value column (optional)
-names(r_df)[3] <- "value"  # Assuming a single-band raster
 
 coastline <- st_read("/home/ddonoso/Desktop/datos_Albert/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp")
 #coastline <- st_read("/media/ddonoso/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp")
 coastline <- st_transform(coastline, crs = 4326)
-bbox <- st_bbox(c(xmin = -70, ymin = -73, xmax = -50, ymax = -61), crs = 4326)
+bbox <- st_bbox(c(xmin = -75, ymin = -73, xmax = -50, ymax = -61), crs = 4326)
 bbox_sf <- st_as_sfc(bbox)  # Convert bbox to spatial object
 coastline_crop <- st_crop(coastline, bbox_sf)
 
 #shp_file <- "/home/ddonoso/Desktop/datos_Albert/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp"
 #shp_file <- "/Volumes/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp"
-shp <- st_read(coastline_crop)
-shp.df <- as_Spatial(coastline_crop)
+#shp <- st_read(coastline_crop)
+#shp.df <- as_Spatial(coastline_crop)
 
 # Read weather stations and grid points
 stations <- read.csv("all_coords_long.csv", sep = ",", header = TRUE)
+
+stations$station_type <- {recode(stations$dataset, 
+                                  station = "Weather Stations", 
+                                  era5land = "ERA5 Land", 
+                                  era5 = "ERA5", 
+                                  racmo5.5 = "RACMO 5.5km", 
+                                  racmo11 = "RACMO 11km")
+} # Rename models and stations - recode factor levels
+stations$station_label <- {recode(stations$station, 
+                                   ferraz = "Ferraz", 
+                                   escudero = "Frei", 
+                                   carlini = "Carlini", 
+                                   prat = "Prat", 
+                                   jci = "Juan Carlos I",
+                                   byers = "Byers",
+                                   gdg = "Gabriel de Castilla",
+                                   ohiggins = "O'Higgins",
+                                   esperanza = "Esperanza",
+                                   racer = "Racer Rock",
+                                   palmer = "Palmer",
+                                   hugo = "Hugo Island",
+                                   vernadsky = "Vernadsky",
+                                   dismal = "Dismal Island",
+                                   sanmartin = "San Martín",
+                                   hurd = "Hurd Glacier",
+                                   rothera = "Rothera",
+                                   fossilbluff = "Fossil Bluff",
+                                   kirkwood = "Kirkwood Island")
+}
+
 stations_filtered <- stations %>%
   dplyr::filter(dataset == "station")
-stations_filtered1 <- stations_filtered %>%
-  dplyr::filter(lat > -64)
 
-stations$station_type <- recode(stations$dataset, 
-                                     station = "Weather Stations", 
-                                     era5land = "ERA5 Land", 
-                                     era5 = "ERA5", 
-                                     racmo5.5 = "RACMO 5.5km", 
-                                     racmo11 = "RACMO 11km")
-# Plot
-m1 <- ggplot() +  
-  geom_raster(data = r_df, aes(x = x, y = y, fill = value)) +
-  scale_fill_gradientn(colors = c("#36648B","#4F94CD", "#AFEEEE","#8B7E66", "#2F4F4F","white", "black"), 
-                       values = scales::rescale(c(-5000, -200, 0, 1, 500, 1000, 2500)),
-                       guide = "none") +
- 
-  #coord_cartesian(ylim = c(-72, -62), xlim = c(-70, -55)) +
-  coord_sf(crs = st_crs(r)) + 
-  geom_point(data = stations, aes(x = long, y = lat, color = station_type), size = 0.5) +
-  geom_text_repel(data= stations_filtered, aes(x = long, y = lat, label = station), box.padding = 0.5, point.padding = 0.3) +
-  xlim(-76,-54) +
-  ylim(-72,-61) +
-  scale_color_manual(name = "", 
-                     values = c("Weather Stations" = "black", 
-                                "ERA5 Land" = "tomato", 
-                                "ERA5" = "darkolivegreen3", 
-                                "RACMO 5.5km" = "plum3", 
-                                "RACMO 11km" = "gold"),
-                     guide = guide_legend(order = 1)) +
-  theme(panel.background = element_blank(), 
-        panel.grid.major = element_line(colour = scales::alpha("white", 0.2)),
-        panel.grid.minor = element_blank(),
-        panel.ontop = TRUE) +
-  labs(x = "", y = "")
+# Create function for the map
+map_stations <- function(labels, xlim, ylim) {
+  ggplot() +  
+    geom_raster(data = r_df, aes(x = x, y = y, fill = value)) +
+    scale_fill_gradientn(colors = c( "#BBFFFF","#FFE7BA","#8B7E66", "#2F4F4F","white", "black"), 
+                         values = scales::rescale(c(0, 1, 100, 500, 1000, 2000)),
+                         limits = c(0,2000),
+                         oob = scales::squish) +
+#    scale_fill_stepsn(n.breaks = 11, colours = rev(brewer.pal(11, "BrBG"))) +
+    geom_sf(data = coastline_crop, color = "black", fill = "grey", size = 0.05 ,alpha = 0) +
+    coord_sf(crs = 4326, #st_crs(r_df)
+             xlim = xlim, 
+             ylim = ylim) + 
+    geom_point(data = stations, aes(x = long, y = lat, color = station_type), size = 1) +
+    scale_color_manual(name = "", 
+                       values = c("Weather Stations" = "black", 
+                                  "ERA5 Land" = "tomato", 
+                                  "ERA5" = "darkolivegreen3", 
+                                  "RACMO 5.5km" = "plum3", 
+                                  "RACMO 11km" = "gold"),
+                       guide = guide_legend(order = 1)) +
+    theme(panel.background = element_blank(), 
+          panel.grid.major = element_line(colour = scales::alpha("black", 0.1)),
+          panel.grid.minor = element_blank(),
+          panel.ontop = TRUE) +
+    labs(x = "", y = "")
+}
 
-m1
+scale_fill_gradientn(colors = c("#36648B","#4F94CD", "#AFEEEE","#FFE7BA","#8B7E66", "#2F4F4F","white", "black"), 
+                     values = scales::rescale(c(-5000, -200, 0, 1, 500, 1000, 2500)),
+                     limits = c(0,2000),
+                     oob = scales::squish) +
+  
+geom_text_repel(data= labels, aes(x = long, y = lat, label = station_label), box.padding = 1, point.padding = 0.3) 
 
-ggsave("peninsula.png", plot = m1, width = 8, height = 8, dpi = 300)
 
-m2 <- ggplot() +  
-  geom_raster(data = r_df, aes(x = x, y = y, fill = value)) +
-  scale_fill_gradientn(colors = c("#36648B","#4F94CD", "#AFEEEE","#8B7E66", "#2F4F4F","white", "black"), 
-                       values = scales::rescale(c(-5000, -331, -330, 0, 100, 500, 2500)),
-                       guide = "none") +
-  geom_sf(data = coastline_crop, color = "black", fill = "grey", size = 0.05 ,alpha = 0) +
-  #coord_cartesian(ylim = c(-72, -62), xlim = c(-70, -55)) +
-  coord_sf(crs = st_crs(r), xlim = c(-62,-56.5), ylim = c(-63.6,-61.8)) + 
-  geom_point(data = stations, aes(x = long, y = lat, color = station_type), size = 1) +
-  geom_text_repel(data= stations_filtered1, aes(x = long, y = lat, label = station), box.padding = 1, point.padding = 0.3) +
-  scale_color_manual(name = "", 
-                     values = c("Weather Stations" = "black", 
-                                "ERA5 Land" = "tomato", 
-                                "ERA5" = "darkolivegreen3", 
-                                "RACMO 5.5km" = "plum3", 
-                                "RACMO 11km" = "gold"),
-                     guide = guide_legend(order = 1)) +
-  theme(panel.background = element_blank(), 
-        panel.grid.major = element_line(colour = scales::alpha("white", 0.2)),
-        panel.grid.minor = element_blank(),
-        panel.ontop = TRUE) +
-  labs(x = "", y = "")
+labels <- stations_filtered %>%
+  dplyr::filter(lat < -64)
+xlim = c(-61.5,-56.5)
+ylim = c(-63.6,-61.8)
+#png("map_shetlands.png", width = 4000, height = 2500, res = 300, bg = "transparent")
+map_stations(labels,xlim,ylim)
+dev.off()
 
-m2
-
-ggsave("shetlands.png", plot = m2, width = 8, height = 8, dpi = 300)
 
 m2<- ggplot() +  
   geom_polygon(data=shp.df, aes(x=long, y=lat, group=group), alpha= 0.6) +
@@ -1515,8 +1555,8 @@ m2<- ggplot() +
 m2
 ggsave("ws_shetlands.png", plot = m2, width = 8, height = 8, dpi = 300)
 
-library(geosphere)
 
+library(geosphere)
 # Calculate distances using distHaversine for all points
 coords1 <- as.matrix(stations[, c(3, 2)])  # Extract station coordinates from df stations (longitude, latitude)
 coords2 <- as.matrix(stations[, c(5, 4)])  # Extract reanalysis coordinates from df stations (longitude, latitude)
@@ -1594,7 +1634,7 @@ data_frames <- lapply(data_frames, function(df) { # Remove Relative Humidity > 1
   return(df)
 })
 
-# Check temperature  and hr failure in Palmer
+# Remove periods with temperature and hr failure in Palmer
 df <- data_frames$palmer
 subset_df <- df[df$date >= as.Date("2010-05-30") & df$date <= as.Date("2010-10-15"), ]
 plot(subset_df$date, subset_df$temp) 
@@ -1891,6 +1931,11 @@ grid.draw(plot)
 dev.off()  
 
     # Extract study period from weather stations ----
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_edit")
+
+file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
+data_frames <- lapply(file_list, read.csv)
+names(data_frames) <- sub("\\.csv$", "", basename(file_list))
 
 data_frames <- lapply(data_frames, function(df) { # Remove flag columns
   df <- df %>%
@@ -1901,25 +1946,24 @@ data_frames <- lapply(data_frames, function(df) { # Remove flag columns
 remove <- c("dismal", "kirkwood", "racer", "hugo", "gdc")
 data_frames <- data_frames[!names(data_frames) %in% remove]
 
-
-period1 <- lapply(data_frames, function(df) {
+df_list <- lapply(data_frames, function(df) {
   df %>%
     mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    dplyr::filter(date >= as.POSIXct("2013-10-11 15:00:00") & date < as.POSIXct("2014-11-30 03:00:00"))
+    dplyr::filter(
+      (date >= as.POSIXct("2013-10-11 15:00:00", tz="UTC") & date < as.POSIXct("2014-11-30 03:00:00", tz="UTC")) |
+        (date >= as.POSIXct("2017-07-27 22:00:00", tz="UTC") & date < as.POSIXct("2019-05-15 22:00:00", tz="UTC")) |
+        (date >= as.POSIXct("2021-06-07 19:00:00", tz="UTC") & date < as.POSIXct("2022-09-23 00:00:00", tz="UTC"))
+    )
 })
 
-period2 <- lapply(data_frames, function(df) {
-  df %>%
-    mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    dplyr::filter(date >= as.POSIXct("2017-07-27 22:00:00") & date < as.POSIXct("2019-05-15 22:00:00"))
-})
+# Export modified files
+output_directory <- "/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_edit"
 
-period3 <- lapply(data_frames, function(df) {
-  df %>%
-    mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    dplyr::filter(date >= as.POSIXct("2021-06-07 19:00:00") & date < as.POSIXct("2022-09-23 00:00:00"))
-})
-
+for (name in names(df_list)) {
+  df_list[[name]]$date <- format(df_list[[name]]$date, "%Y-%m-%d %H:%M:%S")
+  file_path <- file.path(output_directory, paste0("validation_", name, ".csv"))
+  write.csv(data_frames[[name]], file = file_path, row.names = FALSE)
+}
 
 {ohiggins <- ohiggins_flagged %>%
   select(-c(8:13,)) %>%
@@ -1951,24 +1995,6 @@ vernadsky <- vernadsky_flagged %>%
 }
 stations <- list(carlini, esperanza, jci, ohiggins, prat, rothera, sanmartin, vernadsky)
 
-# Rewrite Rothera with new data  ----
-process_df <- function(df) {
-  df <- df %>%
-    # Convert time to a formatted string
-    mutate(date = as.POSIXct(paste(year, month, day, hour, min, sep = "-"), format = "%Y-%m-%d-%H-%M", tz = "UTC")) %>%
-    # Reorder columns, date first
-    select(date, everything())  %>% 
-    # Change ckass of numeric variables
-    mutate(across(6:11, as.numeric)) %>%
-    mutate(vel = vel * 0.514444) %>% # Transform wind speed from knots to m/s
-    select(-c(2:6))
-  return(df)
-}
-df1 <- read.delim("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_rothera/rothera_validation.txt", sep = "", header = TRUE, dec = ".")
-df1 <- process_df(df1)
-stations[[6]] <- merge(df1, stations[[6]], by = "date", all.y = TRUE, suffixes = c("_df1", ""))
-stations[[6]] <- stations[[6]][, !names(stations[[6]]) %in% c("dir", "vel", "temp", "pres", "hr", "dew")]
-names(stations[[6]]) <- sub("_df1$", "", names(stations[[6]]))
 
 # Remove wind directions > 360 in station datasets
 stations <- lapply(stations, function(df) {
