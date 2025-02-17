@@ -1423,14 +1423,18 @@ write.csv(df, "kirkwood.csv", row.names = FALSE)
 
 # Plot meteo stations and nearest grid points ----
 setwd("/media/ddonoso/KINGSTON")
+library(raster)
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+
+
+library(mapproj)
 library(mapdata)
 library(rgdal)
 library(ggmap)
-library(raster)
-library(mapproj)
-library(sf)
-library(ggplot2)
-library(ggrepel)
 library(scales)
 library(ggnewscale)
 library(paletteer)
@@ -1446,32 +1450,24 @@ r_df <- as.data.frame(r, xy = TRUE)
 names(r_df)[3] <- "value"
 
 
-# Load the raster file
-tif_file <- "/home/ddonoso/Desktop/datos_Albert/output_GEBCOIceTopo.tif"
-
-
 coastline <- st_read("/home/ddonoso/Desktop/datos_Albert/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp")
 #coastline <- st_read("/media/ddonoso/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp")
 coastline <- st_transform(coastline, crs = 4326)
-bbox <- st_bbox(c(xmin = -75, ymin = -73, xmax = -50, ymax = -61), crs = 4326)
+bbox <- st_bbox(c(xmin = -80, ymin = -73, xmax = -50, ymax = -61), crs = 4326)
 bbox_sf <- st_as_sfc(bbox)  # Convert bbox to spatial object
 coastline_crop <- st_crop(coastline, bbox_sf)
-
-#shp_file <- "/home/ddonoso/Desktop/datos_Albert/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp"
-#shp_file <- "/Volumes/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp"
-#shp <- st_read(coastline_crop)
-#shp.df <- as_Spatial(coastline_crop)
 
 # Read weather stations and grid points
 stations <- read.csv("all_coords_long.csv", sep = ",", header = TRUE)
 
+# Rename models and stations - recode factor levels
 stations$station_type <- {recode(stations$dataset, 
                                   station = "Weather Stations", 
                                   era5land = "ERA5 Land", 
                                   era5 = "ERA5", 
                                   racmo5.5 = "RACMO 5.5km", 
                                   racmo11 = "RACMO 11km")
-} # Rename models and stations - recode factor levels
+} 
 stations$station_label <- {recode(stations$station, 
                                    ferraz = "Ferraz", 
                                    escudero = "Frei", 
@@ -1491,10 +1487,15 @@ stations$station_label <- {recode(stations$station,
                                    hurd = "Hurd Glacier",
                                    rothera = "Rothera",
                                    fossilbluff = "Fossil Bluff",
-                                   kirkwood = "Kirkwood Island")
+                                   kirkwood = "Kirkwood Island",
+                                   kingsejong = "King Sejong")
 }
 
-stations_filtered <- stations %>%
+# Remove stations excluded from validations
+stations_validations <- stations %>%
+  dplyr::filter(!station %in% c("hurd", "byers", "ferraz", "dismal", "kirkwood", "racer", "hugo", "gdg"))
+
+stations_labels <- stations_validations %>%
   dplyr::filter(dataset == "station")
 
 # Create function for the map
@@ -1504,43 +1505,45 @@ map_stations <- function(labels, xlim, ylim) {
     scale_fill_gradientn(colors = c( "#BBFFFF","#FFE7BA","#8B7E66", "#2F4F4F","white", "black"), 
                          values = scales::rescale(c(0, 1, 100, 500, 1000, 2000)),
                          limits = c(0,2000),
-                         oob = scales::squish) +
-#    scale_fill_stepsn(n.breaks = 11, colours = rev(brewer.pal(11, "BrBG"))) +
+                         oob = scales::squish,
+                         name = "Elevation (m)") +
     geom_sf(data = coastline_crop, color = "black", fill = "grey", size = 0.05 ,alpha = 0) +
-    coord_sf(crs = 4326, #st_crs(r_df)
-             xlim = xlim, 
-             ylim = ylim) + 
-    geom_point(data = stations, aes(x = long, y = lat, color = station_type), size = 1) +
-    scale_color_manual(name = "", 
-                       values = c("Weather Stations" = "black", 
+    coord_sf(xlim = xlim, ylim = ylim) + 
+    geom_point(data = stations_validations, aes(x = long, y = lat, color = station_type), size = 1) +
+    geom_text_repel(data = labels,
+                    aes(x = long, y = lat, label = station_label),
+                    box.padding = 0.7,
+                    point.padding = 0.1) +
+    theme(panel.background = element_blank(), 
+          panel.grid.major = element_line(colour = scales::alpha("black", 0.1)),
+          panel.grid.minor = element_blank(),
+          panel.ontop = TRUE,
+          legend.position = "none") +
+    labs(x = "", y = "") +
+    scale_color_manual(values = c("Weather Stations" = "black", 
                                   "ERA5 Land" = "tomato", 
                                   "ERA5" = "darkolivegreen3", 
                                   "RACMO 5.5km" = "plum3", 
                                   "RACMO 11km" = "gold"),
-                       guide = guide_legend(order = 1)) +
-    theme(panel.background = element_blank(), 
-          panel.grid.major = element_line(colour = scales::alpha("black", 0.1)),
-          panel.grid.minor = element_blank(),
-          panel.ontop = TRUE) +
-    labs(x = "", y = "")
+                     name = "Data series")
 }
 
-scale_fill_gradientn(colors = c("#36648B","#4F94CD", "#AFEEEE","#FFE7BA","#8B7E66", "#2F4F4F","white", "black"), 
-                     values = scales::rescale(c(-5000, -200, 0, 1, 500, 1000, 2500)),
-                     limits = c(0,2000),
-                     oob = scales::squish) +
-  
-geom_text_repel(data= labels, aes(x = long, y = lat, label = station_label), box.padding = 1, point.padding = 0.3) 
-
-
-labels <- stations_filtered %>%
-  dplyr::filter(lat < -64)
+labels <- stations_labels %>%
+  dplyr::filter(lat > -63.6)
 xlim = c(-61.5,-56.5)
 ylim = c(-63.6,-61.8)
-#png("map_shetlands.png", width = 4000, height = 2500, res = 300, bg = "transparent")
+png("map_shetlands.png", width = 3000, height = 2000, res = 300, bg = "transparent") #height = 2000,
 map_stations(labels,xlim,ylim)
 dev.off()
 
+labels <- stations_labels %>%
+  dplyr::filter(lat < -63.6) %>%
+  dplyr::filter(lat > -66)
+xlim = c(-66,-63)
+ylim = c(-65.4,-64.5)
+png("map_central_peninsula.png", width = 3000, height = 2000, res = 300, bg = "transparent") #height = 2000,
+map_stations(labels,xlim,ylim)
+dev.off()
 
 m2<- ggplot() +  
   geom_polygon(data=shp.df, aes(x=long, y=lat, group=group), alpha= 0.6) +

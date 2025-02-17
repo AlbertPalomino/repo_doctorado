@@ -1,4 +1,35 @@
+library(dplyr)
+library(lubridate)
 
+# Import station data ----
+setwd("/media/ddonoso/KINGSTON/station_series")
+
+file_list <- list.files(pattern = "^validation_", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
+station_list <- lapply(file_list, read.csv)
+names(station_list) <- gsub("validation_|\\.csv$", "", basename(file_list))
+
+data_frames <- station_list
+
+data_frames <- lapply(data_frames, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz="UTC"))
+  })
+
+# Fill hours o'clock with 00:00:00 if needed
+data_frames <- lapply(data_frames, function(df) {
+  df %>%
+    mutate(date = as.character(date),
+           date = if_else(nchar(date) == 10, paste0(date, " 00:00:00"), date),  # Append "00:00:00" if missing
+           date = ymd_hms(date))  # Convert to proper datetime format
+})
+
+
+stations_validations <- stations_validations %>%
+  group_by(station) %>%
+  mutate(elevation_diff = elevation - elevation[dataset == "station"]) %>%
+  ungroup()
+
+# Import and process ERA5-Land ----
 
 setwd("/media/ddonoso/KINGSTON/era5land")
 

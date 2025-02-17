@@ -3,20 +3,17 @@ clear all; close all; clc
 cd /media/ddonoso/KINGSTON/era5land
 
 folder = '/media/ddonoso/KINGSTON/era5land';
-folder = '/home/ddonoso/Desktop/datos_Albert/era5land_fossilbluff';
+%folder = '/home/ddonoso/Desktop/datos_Albert/era5land_fossilbluff';
 
 file_list = dir(fullfile(folder, '*.nc'));
 
-% fileList = dir(fullfile(folder, '*.nc'));
-
-addpath(genpath('/home/ddonoso/Desktop/datos_Albert/era5land_fossilbluff'))
+%addpath(genpath('/home/ddonoso/Desktop/datos_Albert/era5land_fossilbluff'))
 addpath(genpath('/media/ddonoso/KINGSTON/era5land'))
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/'))
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/funciones_matlab/m_map1.4/m_map'))
 
 ncfile = file_list(10).name;
-ncdisp(ncfile) % read info in file
-%missingValue= -32767;
+ncdisp(ncfile) 
 
 lat = ncread(ncfile, 'latitude');
 lon = ncread (ncfile, 'longitude');
@@ -103,10 +100,6 @@ for i = 20%1:size(stations, 1)
             %time = ncread(ncfile, 'valid_time');
             time = ncread(ncfile, 'time');
             
-            % era5land seconds since 1900-01-01
-            %n = datenum(1900,01,01,0,0,double(time));
-            %datestr(n)
-            
             cat_time_series = [cat_time_series; time];
             
             [i,j,k]
@@ -124,7 +117,7 @@ for i = 20%1:size(stations, 1)
     
     %var_list2{i} = var_table;  % Store each table in a cell array
     
-    fn = sprintf ('%s/era5land_%s.csv', folderPath, string(stations.Var1(i)));
+    fn = sprintf ('%s/era5land_%s.csv', folder, string(stations.Var1(i)));
     writetable(var_table, fn);
             
 end                      
@@ -132,7 +125,7 @@ end
 
 % Plot tests to check if data is correctly extracted
 
-plot(var_series2(:, 8), var_series2(:, 7), '-o');
+plot(var_series2(:, 11), var_series2(:, 4), '-o');
 
 % Plot map with colonies and nearest ERA5Land coords
 figure
