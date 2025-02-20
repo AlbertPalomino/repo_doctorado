@@ -23,14 +23,15 @@ for i = 1:length(data)
     
     % Convert time from Unix format, Adjust refernce year and seconds/hours
    
-    %Td = datetime(1970,1,1) + seconds(time); % ERA5 and ERA5-Land fossilbluff
-    Td = datetime(1900,1,1) + hours(time); % ERA5-Land
+    Td = datetime(1970,1,1) + seconds(time); % ERA5 and ERA5-Land fossilbluff
+    %Td = datetime(1900,1,1) + hours(time); % ERA5-Land
+    %Td = datetime(1950,1,1) + days(time); % RACMO
 
     Td.Format = 'yyyy-MM-dd HH:mm:ss';
     mat.date = Td;
     clear time Td
     
-    pos = find(mat.date>=datetime('2013-10-12 00:00:00','InputFormat','yyyy-MM-dd HH:mm:ss') & mat.date<datetime('2014-11-30 00:00:00','InputFormat','yyyy-MM-dd HH:mm:ss') ...
+    pos = find(mat.date>=datetime('2013-10-12 00:00:00','InputFormat','yyyy-MM-dd HH:mm:ss') & mat.date<datetime('2014-11-30 03:00:00','InputFormat','yyyy-MM-dd HH:mm:ss') ...
         |    mat.date>=datetime('2017-07-28 00:00:00','InputFormat','yyyy-MM-dd HH:mm:ss') & mat.date<datetime('2019-05-15 00:00:00','InputFormat','yyyy-MM-dd HH:mm:ss') ... % start at 2017-07-28, otherwise n days of raw data > n days every 3h
         |   mat.date>=datetime('2021-06-08 00:00:00','InputFormat','yyyy-MM-dd HH:mm:ss') & mat.date<datetime('2022-09-23 00:00:00','InputFormat','yyyy-MM-dd HH:mm:ss'));
     
@@ -58,10 +59,12 @@ for i = 1:length(data)
         daily_sum_k(:, 1:4) = []; % Remove count column
         daily_sum_k.Properties.VariableNames = strrep(daily_sum_k.Properties.VariableNames, 'sum_', '');
 
+
         % 🔹 Compute monthly sums (before filtering)
         monthly_sum_k = varfun(@sum, mat_year, 'GroupingVariables', {'Year', 'Month'}, 'InputVariables', vars_suma);
         monthly_sum_k(:, 1:3) = []; % Remove count column
         monthly_sum_k.Properties.VariableNames = strrep(monthly_sum_k.Properties.VariableNames, 'sum_', '');
+
 
         daily_sums_all = [daily_sums_all; daily_sum_k];
         monthly_sums_all = [monthly_sums_all; monthly_sum_k];
@@ -84,6 +87,7 @@ for i = 1:length(data)
         daily_mean_k = varfun(@mean, mat_year, 'GroupingVariables', {'Year', 'Month', 'Day'}, 'InputVariables', vars_promedio);
         daily_mean_k(:, 4) = []; % Remove count column
         daily_mean_k.Properties.VariableNames = strrep(daily_mean_k.Properties.VariableNames, 'mean_', '');
+
 
         % Compute monthly means (only filtered variables)
         monthly_mean_k = varfun(@mean, mat_year, 'GroupingVariables', {'Year', 'Month'}, 'InputVariables', vars_promedio);
