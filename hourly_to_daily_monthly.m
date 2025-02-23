@@ -22,9 +22,8 @@ for i = 1:length(data)
     time = mat.date;
     
     % Convert time from Unix format, Adjust refernce year and seconds/hours
-   
-    %Td = datetime(1970,1,1) + seconds(time); % ERA5 and ERA5-Land fossilbluff
-    Td = datetime(1900,1,1) + hours(time); % ERA5-Land
+    Td = datetime(1970,1,1) + seconds(time); % ERA5 and ERA5-Land fossilbluff
+    %Td = datetime(1900,1,1) + hours(time); % ERA5-Land
 
     Td.Format = 'yyyy-MM-dd HH:mm:ss';
     mat.date = Td;
@@ -36,7 +35,6 @@ for i = 1:length(data)
     
     mat = mat(pos,:);
     
-
     % 🔹 Define variables to sum and average
     vars_suma = {'prec', 'snowfall'};
     vars_promedio = setdiff(mat.Properties.VariableNames, [{'date'}, vars_suma]); % Exclude 'prec' and 'snowfall'
@@ -95,12 +93,12 @@ for i = 1:length(data)
     end
 
     % 🔹 Merge summed and averaged values
-    final_daily = [daily_means_all, daily_sums_all]; % Combine daily means and daily sums
-    final_monthly = [monthly_means_all, monthly_sums_all]; % Combine monthly means and monthly sums
+    daily = [daily_means_all, daily_sums_all]; % Combine daily means and daily sums
+    monthly = [monthly_means_all, monthly_sums_all]; % Combine monthly means and monthly sums
 
     % 🔹 Save final daily & monthly matrices
-    writetable(final_daily, fullfile(ruta, 'daily', name));
-    writetable(final_monthly, fullfile(ruta, 'monthly', name));
+    writetable(daily, fullfile(ruta, 'daily', name));
+    writetable(monthly, fullfile(ruta, 'monthly', name));
 end
 
 restoredefaultpath; savepath;
