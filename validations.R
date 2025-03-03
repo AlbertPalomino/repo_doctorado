@@ -33,11 +33,48 @@ for (name in names(data_frames)) {
   write.csv(data_frames[[name]], file = file_path, row.names = FALSE)
 }
 
-# Calculate elevation difference between station and grid point ----
+# Calculate elevation difference and distance between station and grid point ----
 stations_validations <- stations_validations %>%
   group_by(station) %>%
   mutate(elevation_diff = elevation - elevation[dataset == "station"]) %>%
   ungroup()
+
+# Calculate distances using distHaversine for all points
+coords1 <- as.matrix(sations_validations[c(1:12), c(4, 3)])  # Extract station coordinates from df stations (longitude, latitude)
+coords2 <- as.matrix(stations[, c(5, 4)])  # Extract reanalysis coordinates from df stations (longitude, latitude)
+distances <- distHaversine(coords1, coords2)  # Distance in meters
+stations$distance <- distances / 1000 # Convert distances to kilometers and add as a new column
+
+library(geosphere)
+library(dplyr)
+
+# Number of groups (each has 12 rows)
+n_groups <- nrow(stations_validations) / 12  
+
+# Initialize an empty vector for distances
+distances <- numeric(nrow(stations_validations))
+
+# Loop through each group of 12 rows
+for (i in seq_len(n_groups)) {
+  
+  start_idx <- 1 + (12 * (i - 1))
+  end_idx <- 12 + (12 * (i - 1))
+  
+  # Extract station coordinates (longitude in col 4, latitude in col 3)
+  coords1 <- as.matrix(stations_validations[1:12, c(4, 3)])
+  
+  # Extract reanalysis coordinates (next 12 rows)
+  coords2 <- as.matrix(stations_validations[start_idx:end_idx, c(4, 3)])
+  
+  # Compute Haversine distance (meters) and convert to km
+  distances[start_idx:end_idx] <- distHaversine(coords1, coords2) / 1000  
+}
+
+# Add distances to the data frame
+stations_validations$distance <- distances
+output_directory <- "/media/ddonoso/KINGSTON"
+file_path <- file.path(output_directory, paste0("coords_dist.csv"))
+write.csv(stations_validations, file = file_path, row.names = FALSE)
 
 # Plot logarithmic attenuation of wind ----
 {
@@ -70,15 +107,18 @@ stations_validations <- stations_validations %>%
   points(c(y1, y2), c(x1, x2), col = 'red', pch = 19)  # points at known values
   points(c(value_at_3), c(3), col = 'blue', pch = 19)  # points at known values
   }
-# Import and process ERA5-Land ----
-setwd("/media/ddonoso/KINGSTON/era5land")
+# Import and process ERA5 and ERA5-Land ----
+
+#path <- "/media/ddonoso/KINGSTON/era5land"
+#path <- "/media/ddonoso/KINGSTON/era5land_fossilbluff"
+path <- "/media/ddonoso/KINGSTON/era5"
+setwd(path)
 
 file_list <- list.files(pattern = "*\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
 
-era5land <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
-names(era5land) <- gsub("^era5land_|\\.csv$", "", basename(file_list))
-
-df_list <- era5land
+df_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+#names(df_list) <- gsub("^era5land_|\\.csv$", "", basename(file_list))
+names(df_list) <- gsub("^era5_|\\.csv$", "", basename(file_list))
 
 # Remove unwanted stations
 remove <- c("ferraz", "byers", "dismal", "kirkwood", "racer", "hugo", "gdg","hurd")
@@ -90,7 +130,8 @@ original_names <- names(df_list)
 # Convert Julian hours in the date column for each data frame
 df_list <- lapply(df_list, function(df) {
   df %>%
-    mutate(date = as_datetime(date * 3600, origin = as.POSIXct("1900-01-01 00:00:00", tz = "UTC"), tz = "UTC"))
+    #mutate(date = as_datetime(date* 3600, origin = as.POSIXct("1900-01-01 00:00:00", tz = "UTC"), tz = "UTC")) ERA5-Land
+     mutate(date = as_datetime(date, origin = as.POSIXct("1970-01-01 00:00:00", tz = "UTC"), tz = "UTC")) # ERA5 and ERA5-Land fossil bluff
 })
 
 # Subset study periods
@@ -104,11 +145,42 @@ df_list <- lapply(df_list, function(df) {
     select(date, everything())
 })
 
+
 # Convert temp, dew and skin temp from Kelvin to Celsius for each data frame
 df_list <- lapply(df_list, function(df) {
   df %>%
-    mutate(across(4:6, ~ . - 273.15))  # Kelvin to Celsius
+    mutate(across(any_of(c("temp","dew","skt")), ~ . - 273.15))  # Kelvin to Celsius
 })
+
+# Calculate relative humidity
+library(humidity)
+df_list <- lapply(df_list, function(df) {
+  df %>%
+    mutate(hr = RH(temp, dew, isK = FALSE)) %>%
+    select(-dew)
+})
+
+# Temperature correction using temperature environmental vertical lapse rate of 6.5 C/km
+stations_validations$temp_diff <- (stations_validations$elevation_diff) / 1000 * 6.5
+#elev_diff <- stations_validations[stations_validations$dataset == "era5land", c(2,8,9)]
+elev_diff <- stations_validations[stations_validations$dataset == "era5", c(2,8,9)]
+
+df_list <- lapply(seq_along(df_list), function(i) {
+  
+  dataset_name <- names(df_list)[i]
+  
+  temp_adjustment <- elev_diff$temp_diff[elev_diff$station == dataset_name]
+  
+  df_list[[i]] <- df_list[[i]] %>%
+    rename(
+      old_temp = any_of("temp"),
+      old_skt = any_of("skt")) %>%
+    mutate(
+      temp = if ("old_temp" %in% names(.)) old_temp + temp_adjustment,
+      skt = if ("old_skt" %in% names(.)) old_skt + temp_adjustment)
+})
+
+names(df_list) <- original_names
 
 # Transform u10 and v10 to wind speed and direction for each data frame
 df_list <- lapply(df_list, function(df) {
@@ -119,7 +191,7 @@ df_list <- lapply(df_list, function(df) {
     )
 })
 
-# Calculate wind speed at 3m based on a logarithmic attenuation
+# Calculate wind speed at 3 m based on a logarithmic attenuation
 df_list <- lapply(df_list, function(df) {
   
   # Vector to store the value at x = 3 for each row
@@ -147,63 +219,12 @@ df_list <- lapply(df_list, function(df) {
   return(df)
 })
 
-# Temperature correction using temperature environmental vertical lapse rate of 6.5 C/km
-stations_validations$temp_diff <- (stations_validations$elevation_diff) / 1000 * 6.5
-elev_diff <- stations_validations[stations_validations$dataset == "era5land", c(2,8,9)]
-
-df_list <- lapply(seq_along(df_list), function(i) {
-  
-  dataset_name <- names(df_list)[1]
-  
-  temp_adjustment <- elev_diff$temp_diff[elev_diff$station == dataset_name]
-  
-  df_list[[i]] %>%
-    rename(
-      old_temp = temp,
-      old_dew = dew,
-      old_skt = skt) %>%
-    mutate(
-      temp = old_temp + temp_adjustment,
-      dew = old_dew + temp_adjustment,
-      skt = old_skt + temp_adjustment)
-})
-
-#file_path= "/media/ddonoso/Pengo2/Doctorado/datos_netcdf_rema/era5land/station_locations.csv"
-#df <- read.csv(file_path, sep = ",", header = TRUE)
-#df$elev_station <- c(8, 45, 10, 5, 12, 70, 15, 10, 25, 17, 10, 25, 7, 12, 5, 93, 4, 63, 30) # Elevation of weather stations
-#df$elev_diff <- df$elev - df$elev_station
-#df$temp_diff <- (df$elev_diff) / 1000 * 6.5
-#temp_diff <- df$temp_diff[c(3,9,5,8,4,17,15,13)]
-#elev_diff <- df$elev_diff[c(3,9,5,8,4,17,15,13)]
-#coords <- df
-
-names(df_list) <- original_names
-
-# Calculate relative humidity
-library(humidity)
+# In ERA5: Transform Mean Sea Level Pressure from Pa to hPa
 df_list <- lapply(df_list, function(df) {
   df %>%
-    mutate(hr = RH(old_temp, old_dew, isK = FALSE))
+    mutate(pres = pres / 100)
 })
 
-# Adjust pressure according to difference in elevation
-df_list <- lapply(seq_along(df_list), function(i) { i=1
-  P0 <- 101325  # Pa
-  g <- 9.81     # m/s²
-  M <- 0.029    # kg/mol
-  R <- 8.314    # J/(mol·K)
-  T <- df_list[[i]]$old_temp + 273.15 # degrees Kelvin
-  
-  dataset_name <- names(df_list)[i]
-
-  delta_h <- elev_diff$elevation_diff[elev_diff$station == dataset_name]
-  delta_P <- P0 * (g * M / (R * T)) * delta_h  # Calculate delta_P for each station's elevation difference 
-  
-  df_list[[i]] %>%
-    rename(old_pres = pres) %>% 
-    mutate(pres = as.numeric(old_pres) + delta_P) %>% 
-    mutate(pres = pres / 100)  # Convert resulting pressure back to hPa
-})
 names(df_list) <- original_names
 
 # Accumulate precipitation and snowfall over 3h periods
@@ -224,8 +245,13 @@ df_list <- lapply(df_list, function(df) {
     filter(format(date, "%H:%M:%S") %in% times_to_keep)
 })
 
-# Save each dataframe in the list as CSV
-output_directory <- "/media/ddonoso/KINGSTON/validations/era5land"
+# Save each data frame and rename the df list
+output_directory <- "/media/ddonoso/KINGSTON/validations/era5"
+
+df_list <- lapply(df_list, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, "%H:%M:%S", tz = "UTC"))
+})
 
 for (name in names(df_list)) {
   df_list[[name]]$date <- format(df_list[[name]]$date, "%Y-%m-%d %H:%M:%S")
@@ -233,3 +259,8 @@ for (name in names(df_list)) {
   write.csv(df_list[[name]], file = file_path, row.names = FALSE)
 }
 
+df_list <- era5
+era5 <- df_list
+era5land <- df_list
+era5land_fossil <- df_list
+era5land$fossilbluff <- era5land_fossil$fossilbluff
