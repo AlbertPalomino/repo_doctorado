@@ -24,6 +24,10 @@ data_frames <- lapply(data_frames, function(df) {
            date = ymd_hms(date))  # Convert to proper datetime format
 })
 
+# Rename data frames to match those of reanalyses
+names(data_frames)[names(data_frames) == "fossil"] <- "fossilbluff"
+names(data_frames)[names(data_frames) == "king"] <- "kingsejong"
+
 # Export datasets
 output_directory <- "/media/ddonoso/KINGSTON/station_series/"
 
@@ -264,3 +268,82 @@ era5 <- df_list
 era5land <- df_list
 era5land_fossil <- df_list
 era5land$fossilbluff <- era5land_fossil$fossilbluff
+
+# Calculate mean and SD in each data series ----
+setwd("/media/ddonoso/KINGSTON/validations")
+
+# Date columns in POSIXct format
+era5land <- lapply(era5land, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz="UTC"))
+})
+
+# Create function to extract variable columns from each data frame list
+calculate_stats <- function(df_station, df_era5, df_era5land, df_name) {
+  
+  cols_to_analyze <- c("temp", "vel", "pres")
+  stats_df <- data.frame(df_name = df_name, stringsAsFactors = FALSE)
+  
+  # Join datasets by date, ensuring correct suffixes
+  merged_df <- df_station %>%
+    select(date, all_of(cols_to_analyze), any_of("hr")) %>%
+    rename_with(~paste0(., "_station"), -date) %>%
+    full_join(df_era5 %>%
+                select(date, all_of(cols_to_analyze), any_of("hr")) %>%
+                rename_with(~paste0(., "_era5"), -date),
+              by = "date") %>%
+    full_join(df_era5land %>%
+                select(date, all_of(cols_to_analyze), any_of("hr")) %>%
+                rename_with(~paste0(., "_era5land"), -date),
+              by = "date")
+  
+  # Compute statistics for temp, vel, and prec
+  for (col in cols_to_analyze) {
+    col_station <- paste0(col, "_station")
+    col_era5 <- paste0(col, "_era5")
+    col_era5land <- paste0(col, "_era5land")
+    
+    stats <- merged_df %>%
+      select(all_of(c(col_station, col_era5, col_era5land))) %>%
+      na.omit() %>%
+      summarise(
+        !!paste0(col_station, "_mean") := round(mean(.data[[col_station]]), 2),
+        !!paste0(col_station, "_sd") := round(sd(.data[[col_station]]), 2),
+        !!paste0(col_era5, "_mean") := round(mean(.data[[col_era5]]), 2),
+        !!paste0(col_era5, "_sd") := round(sd(.data[[col_era5]]), 2),
+        !!paste0(col_era5land, "_mean") := round(mean(.data[[col_era5land]]), 2),
+        !!paste0(col_era5land, "_sd") := round(sd(.data[[col_era5land]]), 2)
+      )
+    
+    stats_df <- bind_cols(stats_df, stats)
+  }
+  
+  # Compute hr statistics only if hr is present
+  if ("hr_station" %in% names(merged_df)) {
+    hr_stats <- merged_df %>%
+      select(hr_station, hr_era5, hr_era5land) %>%
+      na.omit() %>%
+      summarise(
+        hr_station_mean = round(mean(hr_station), 2),
+        hr_station_sd = round(sd(hr_station), 2),
+        hr_era5_mean = round(mean(hr_era5), 2),
+        hr_era5_sd = round(sd(hr_era5), 2),
+        hr_era5land_mean = round(mean(hr_era5land), 2),
+        hr_era5land_sd = round(sd(hr_era5land), 2)
+      )
+    
+    stats_df <- bind_cols(stats_df, hr_stats)
+  }
+  
+  return(stats_df)
+}
+
+# Apply function to each dataset in lists
+results_list <- purrr::map(names(data_frames), 
+                    ~ calculate_stats(data_frames[[.x]], era5[[.x]], era5land[[.x]], .x))
+
+# Combine all results into a single data frame
+mean_sd_table <- bind_rows(results_list)
+
+write.csv(mean_sd_table, "mean_sd.csv", row.names = FALSE)
+
