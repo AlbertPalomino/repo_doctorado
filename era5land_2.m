@@ -1,5 +1,5 @@
 clear all; close all; clc
-cd /home/ddonoso/Desktop/DoctoradoDefinitivo
+cd /home/ddonoso/Desktop/repo_doctorado
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/era5/'))
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/'))
 addpath(genpath('/home/ddonoso/Desktop/datos_Albert/Toolbox_oce/funciones_matlab/m_map1.4/m_map'))

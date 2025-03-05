@@ -11,7 +11,7 @@ library(ggplot2)
 library(purrr)
 library(stats)
 library(humidity)
-library(ecmwfr)
+#library(ecmwfr)
 
 # Processing penguin colony database ----
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration")
@@ -1361,6 +1361,26 @@ df$date <- format(df$date, "%Y-%m-%d %H:%M:%S")
 
 write.csv(df, "rothera2025.csv", row.names = FALSE)
 
+    # not necessary anymore - Rewrite Rothera with new data  ----
+process_df <- function(df) {
+  df <- df %>%
+    # Convert time to a formatted string
+    mutate(date = as.POSIXct(paste(year, month, day, hour, min, sep = "-"), format = "%Y-%m-%d-%H-%M", tz = "UTC")) %>%
+    # Reorder columns, date first
+    select(date, everything())  %>% 
+    # Change ckass of numeric variables
+    mutate(across(6:11, as.numeric)) %>%
+    mutate(vel = vel * 0.514444) %>% # Transform wind speed from knots to m/s
+    select(-c(2:6))
+  return(df)
+}
+df1 <- read.delim("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_rothera/rothera_validation.txt", sep = "", header = TRUE, dec = ".")
+df1 <- process_df(df1)
+stations[[6]] <- merge(df1, stations[[6]], by = "date", all.y = TRUE, suffixes = c("_df1", ""))
+stations[[6]] <- stations[[6]][, !names(stations[[6]]) %in% c("dir", "vel", "temp", "pres", "hr", "dew")]
+names(stations[[6]]) <- sub("_df1$", "", names(stations[[6]]))
+
+
     # Kirkwood ----
 setwd("/Volumes/Pengo2/Doctorado/data exploration/meteo/")
 
@@ -1402,38 +1422,128 @@ df$date <- as.character(df$date)
 write.csv(df, "kirkwood.csv", row.names = FALSE)
 
 # Plot meteo stations and nearest grid points ----
-setwd("/media/donoso/Pengo2/Doctorado/datos_netcdf_rema/era5land")
+setwd("/media/ddonoso/KINGSTON")
+library(raster)
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+
+
+library(mapproj)
 library(mapdata)
 library(rgdal)
 library(ggmap)
-library(raster)
-library(mapproj)
-library(sf)
-library(ggplot2)
+library(scales)
+library(ggnewscale)
+library(paletteer)
+library(palettetown)
 
-#shp_file <- "/Volumes/Pengo2/Doctorado/data exploration/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp"
-shp_file <- "/Volumes/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp"
-shp <- st_read(shp_file)
-shp.df <- as_Spatial(shp)
+# Load GECBO 2024 file
+tif_file <- "/home/ddonoso/Desktop/datos_Albert/GEBCO_07_Feb_2025_770c5c4fd7a7/gebco_2023_n-60.0_s-73.0_w-80.0_e-50.0.tif"
+tif_file <- "/home/ddonoso/Desktop/datos_Albert/GEBCO_07_Feb_2025_7573fb81841c/gebco_2024_sub_ice_n-60.0_s-73.0_w-80.0_e-50.0.tif"
+tif_file <- "/home/ddonoso/Desktop/datos_Albert/GEBCO_07_Feb_2025_cc46e7ea3ce9/south_polar_2024_306627_1894737_-3065297_-1386786.tif"
+r <- raster(tif_file)
+r <- projectRaster(r, crs = "+proj=longlat +datum=WGS84", method = "bilinear")
+r_df <- as.data.frame(r, xy = TRUE)
+names(r_df)[3] <- "value"
 
-# Read weather station and ERA5-Land coordinates
-stations <- read.csv("station_locations.csv", sep = ",", header = TRUE)
 
-# Plot
-m1<- ggplot() +  
-  geom_polygon(data=shp.df, aes(x=long, y=lat, group=group), alpha= 0.6) +
-  coord_map(project="stereographic", orientation=c(-90,-60,0),
-            ylim = c(-72, -62), xlim = c(-70, -55)) +
-  geom_point(data=stations, aes(x=target_long, y=target_lat), color="black",size=0.5) +
-  geom_point(data = stations, aes(x = nearest_lon, y = nearest_lat), color = "red", size = 0.5, alpha = 0.5) +
-  geom_text(data = stations, aes(x = target_long, y = target_lat, label = location), 
-            vjust = -1, color = "black", size = 4) + 
-  #theme(panel.background = element_rect(fill = "black"), panel.grid.major = element_line(colour = "white", linetype = "dotted")) +
-  labs(x = "", y = "", title = "Weather stations (black) and ERA5-Land grid points (red)")
-m1
+coastline <- st_read("/home/ddonoso/Desktop/datos_Albert/add_coastline_high_res_polygon_v7_4/add_coastline_high_res_polygon_v7_4.shp")
+#coastline <- st_read("/media/ddonoso/Pengo2/Doctorado/ATA_adm0/ATA_adm0.shp")
+coastline <- st_transform(coastline, crs = 4326)
+bbox <- st_bbox(c(xmin = -80, ymin = -73, xmax = -50, ymax = -61), crs = 4326)
+bbox_sf <- st_as_sfc(bbox)  # Convert bbox to spatial object
+coastline_crop <- st_crop(coastline, bbox_sf)
 
-ggsave("ws_peninsula.png", plot = m1, width = 8, height = 8, dpi = 300)
-ggsave("ws_fossilbluff.png", plot = m1, width = 8, height = 8, dpi = 300)
+# Read weather stations and grid points
+stations <- read.csv("all_coords_long.csv", sep = ",", header = TRUE)
+
+# Rename models and stations - recode factor levels
+stations$station_type <- {recode(stations$dataset, 
+                                  station = "Weather Stations", 
+                                  era5land = "ERA5 Land", 
+                                  era5 = "ERA5", 
+                                  racmo5.5 = "RACMO 5.5km", 
+                                  racmo11 = "RACMO 11km")
+} 
+stations$station_label <- {recode(stations$station, 
+                                   ferraz = "Ferraz", 
+                                   escudero = "Frei", 
+                                   carlini = "Carlini", 
+                                   prat = "Prat", 
+                                   jci = "Juan Carlos I",
+                                   byers = "Byers",
+                                   gdg = "Gabriel de Castilla",
+                                   ohiggins = "O'Higgins",
+                                   esperanza = "Esperanza",
+                                   racer = "Racer Rock",
+                                   palmer = "Palmer",
+                                   hugo = "Hugo Island",
+                                   vernadsky = "Vernadsky",
+                                   dismal = "Dismal Island",
+                                   sanmartin = "San Martín",
+                                   hurd = "Hurd Glacier",
+                                   rothera = "Rothera",
+                                   fossilbluff = "Fossil Bluff",
+                                   kirkwood = "Kirkwood Island",
+                                   kingsejong = "King Sejong")
+}
+
+# Remove stations excluded from validations
+stations_validations <- stations %>%
+  dplyr::filter(!station %in% c("hurd", "byers", "ferraz", "dismal", "kirkwood", "racer", "hugo", "gdg"))
+
+stations_labels <- stations_validations %>%
+  dplyr::filter(dataset == "station")
+
+# Create function for the map
+map_stations <- function(labels, xlim, ylim) {
+  ggplot() +  
+    geom_raster(data = r_df, aes(x = x, y = y, fill = value)) +
+    scale_fill_gradientn(colors = c( "#BBFFFF","#FFE7BA","#8B7E66", "#2F4F4F","white", "black"), 
+                         values = scales::rescale(c(0, 1, 100, 500, 1000, 2000)),
+                         limits = c(0,2000),
+                         oob = scales::squish,
+                         name = "Elevation (m)") +
+    geom_sf(data = coastline_crop, color = "black", fill = "grey", size = 0.05 ,alpha = 0) +
+    coord_sf(xlim = xlim, ylim = ylim) + 
+    geom_point(data = stations_validations, aes(x = long, y = lat, color = station_type), size = 1) +
+    geom_text_repel(data = labels,
+                    aes(x = long, y = lat, label = station_label),
+                    box.padding = 0.7,
+                    point.padding = 0.1) +
+    theme(panel.background = element_blank(), 
+          panel.grid.major = element_line(colour = scales::alpha("black", 0.1)),
+          panel.grid.minor = element_blank(),
+          panel.ontop = TRUE,
+          legend.position = "none") +
+    labs(x = "", y = "") +
+    scale_color_manual(values = c("Weather Stations" = "black", 
+                                  "ERA5 Land" = "tomato", 
+                                  "ERA5" = "darkolivegreen3", 
+                                  "RACMO 5.5km" = "plum3", 
+                                  "RACMO 11km" = "gold"),
+                     name = "Data series")
+}
+
+labels <- stations_labels %>%
+  dplyr::filter(lat > -63.6)
+xlim = c(-61.5,-56.5)
+ylim = c(-63.6,-61.8)
+png("map_shetlands.png", width = 3000, height = 2000, res = 300, bg = "transparent") #height = 2000,
+map_stations(labels,xlim,ylim)
+dev.off()
+
+labels <- stations_labels %>%
+  dplyr::filter(lat < -63.6) %>%
+  dplyr::filter(lat > -66)
+xlim = c(-66,-63)
+ylim = c(-65.4,-64.5)
+png("map_central_peninsula.png", width = 3000, height = 2000, res = 300, bg = "transparent") #height = 2000,
+map_stations(labels,xlim,ylim)
+dev.off()
 
 m2<- ggplot() +  
   geom_polygon(data=shp.df, aes(x=long, y=lat, group=group), alpha= 0.6) +
@@ -1448,8 +1558,8 @@ m2<- ggplot() +
 m2
 ggsave("ws_shetlands.png", plot = m2, width = 8, height = 8, dpi = 300)
 
-library(geosphere)
 
+library(geosphere)
 # Calculate distances using distHaversine for all points
 coords1 <- as.matrix(stations[, c(3, 2)])  # Extract station coordinates from df stations (longitude, latitude)
 coords2 <- as.matrix(stations[, c(5, 4)])  # Extract reanalysis coordinates from df stations (longitude, latitude)
@@ -1527,7 +1637,7 @@ data_frames <- lapply(data_frames, function(df) { # Remove Relative Humidity > 1
   return(df)
 })
 
-# Check temperature  and hr failure in Palmer
+# Remove periods with temperature and hr failure in Palmer
 df <- data_frames$palmer
 subset_df <- df[df$date >= as.Date("2010-05-30") & df$date <= as.Date("2010-10-15"), ]
 plot(subset_df$date, subset_df$temp) 
@@ -1824,6 +1934,11 @@ grid.draw(plot)
 dev.off()  
 
     # Extract study period from weather stations ----
+setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_edit")
+
+file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
+data_frames <- lapply(file_list, read.csv)
+names(data_frames) <- sub("\\.csv$", "", basename(file_list))
 
 data_frames <- lapply(data_frames, function(df) { # Remove flag columns
   df <- df %>%
@@ -1834,25 +1949,24 @@ data_frames <- lapply(data_frames, function(df) { # Remove flag columns
 remove <- c("dismal", "kirkwood", "racer", "hugo", "gdc")
 data_frames <- data_frames[!names(data_frames) %in% remove]
 
-
-period1 <- lapply(data_frames, function(df) {
+df_list <- lapply(data_frames, function(df) {
   df %>%
     mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    dplyr::filter(date >= as.POSIXct("2013-10-11 15:00:00") & date < as.POSIXct("2014-11-30 03:00:00"))
+     dplyr::filter(
+      (date >= as.POSIXct("2013-10-11 15:00:00", tz="UTC") & date < as.POSIXct("2014-11-30 03:00:00", tz="UTC")) |
+        (date >= as.POSIXct("2017-07-27 22:00:00", tz="UTC") & date < as.POSIXct("2019-05-15 22:00:00", tz="UTC")) |
+        (date >= as.POSIXct("2021-06-07 19:00:00", tz="UTC") & date < as.POSIXct("2022-09-23 00:00:00", tz="UTC"))
+    )
 })
 
-period2 <- lapply(data_frames, function(df) {
-  df %>%
-    mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    dplyr::filter(date >= as.POSIXct("2017-10-10 12:00:00") & date < as.POSIXct("2019-05-15 22:00:00"))
-}) # instead of valid period starting at "2017-07-27 22:00:00", start at 2017101012 because of AMPS grid type
+# Export modified files
+output_directory <- "/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/flags_edit"
 
-period3 <- lapply(data_frames, function(df) {
-  df %>%
-    mutate(date = as.POSIXct(date, tz="UTC")) %>%
-    dplyr::filter(date >= as.POSIXct("2021-06-07 19:00:00") & date < as.POSIXct("2022-09-23 00:00:00"))
-})
-
+for (name in names(df_list)) {
+  df_list[[name]]$date <- format(df_list[[name]]$date, "%Y-%m-%d %H:%M:%S")
+  file_path <- file.path(output_directory, paste0("validation_", name, ".csv"))
+  write.csv(data_frames[[name]], file = file_path, row.names = FALSE)
+}
 
 {ohiggins <- ohiggins_flagged %>%
   select(-c(8:13,)) %>%
@@ -1884,24 +1998,6 @@ vernadsky <- vernadsky_flagged %>%
 }
 stations <- list(carlini, esperanza, jci, ohiggins, prat, rothera, sanmartin, vernadsky)
 
-# Rewrite Rothera with new data  ----
-process_df <- function(df) {
-  df <- df %>%
-    # Convert time to a formatted string
-    mutate(date = as.POSIXct(paste(year, month, day, hour, min, sep = "-"), format = "%Y-%m-%d-%H-%M", tz = "UTC")) %>%
-    # Reorder columns, date first
-    select(date, everything())  %>% 
-    # Change ckass of numeric variables
-    mutate(across(6:11, as.numeric)) %>%
-    mutate(vel = vel * 0.514444) %>% # Transform wind speed from knots to m/s
-    select(-c(2:6))
-  return(df)
-}
-df1 <- read.delim("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/meteo_rothera/rothera_validation.txt", sep = "", header = TRUE, dec = ".")
-df1 <- process_df(df1)
-stations[[6]] <- merge(df1, stations[[6]], by = "date", all.y = TRUE, suffixes = c("_df1", ""))
-stations[[6]] <- stations[[6]][, !names(stations[[6]]) %in% c("dir", "vel", "temp", "pres", "hr", "dew")]
-names(stations[[6]]) <- sub("_df1$", "", names(stations[[6]]))
 
 # Remove wind directions > 360 in station datasets
 stations <- lapply(stations, function(df) {

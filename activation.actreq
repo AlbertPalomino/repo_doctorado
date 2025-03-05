@@ -1,0 +1,20 @@
+[activation_request]
+vendor = agisoft
+product = metashape-pro
+version = 1.0
+is_rehostable = true
+is_floating = false
+hostname = taylor
+hostid = disksn:50026B76860B1637
+hostid = disksn:ZFL5E2KB
+hostid = disksn:ZFL5AE7J
+hostid = disksn:ZFL5EFCV
+hostid = disksn:ZFL5E27W
+hostid = ether:50ebf6585961
+hostid = ether:70a6ccb79c88
+rehost = metashape-pro:3abf71f96236b085a4c4909a7cabb917
+client_system = linux
+client_architecture = x86_64
+client_software = minilm 1.0.5
+client_time = 2025-01-28T12:40:10-03:00
+activation_token = eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJsaWNlbnNlX2lkIjo1ODE0NCwiZXhwIjoxNzM4NjI3MTk5fQ.MEUCIGvpmvWCFTh3GXDx3l9LCxx7EvkaWG3IiNVCT6jb2LdmAiEAtrNrdIHF8kcm4iT6E05_VdXkxMj5CZZ0yF08tiL0-u8
