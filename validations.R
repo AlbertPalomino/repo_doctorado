@@ -1,40 +1,46 @@
 library(dplyr)
+library(tidyr)
 library(lubridate)
+library(DTWBI)
+setwd("/Volumes/KINGSTON/validations")
 
 # Import station data ----
 setwd("/media/ddonoso/KINGSTON/station_series")
+setwd("/Volumes/KINGSTON/station_series")
 
-file_list <- list.files(pattern = "^validation_", full.names = TRUE, recursive = TRUE) # recursive to read within subfolders too
+file_list <- list.files(pattern = "^validation_", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
 station_list <- lapply(file_list, read.csv)
 names(station_list) <- gsub("validation_|\\.csv$", "", basename(file_list))
 
 # Rename files
-data_frames <- station_list
+stations <- station_list
 
-data_frames <- lapply(data_frames, function(df) {
-  df %>%
-    mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz="UTC"))
-  })
+# Rename data frames to match those of reanalyses
+names(stations)[names(stations) == "fossil"] <- "fossilbluff"
+names(stations)[names(stations) == "king"] <- "kingsejong"
 
 # Fill hours o'clock with 00:00:00 if needed
-data_frames <- lapply(data_frames, function(df) {
+stations <- lapply(stations, function(df) {
   df %>%
     mutate(date = as.character(date),
            date = if_else(nchar(date) == 10, paste0(date, " 00:00:00"), date),  # Append "00:00:00" if missing
            date = ymd_hms(date))  # Convert to proper datetime format
 })
 
-# Rename data frames to match those of reanalyses
-names(data_frames)[names(data_frames) == "fossil"] <- "fossilbluff"
-names(data_frames)[names(data_frames) == "king"] <- "kingsejong"
+stations <- lapply(stations, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz="UTC"))
+})
+
+rm(station_list)
 
 # Export datasets
 output_directory <- "/media/ddonoso/KINGSTON/station_series/"
 
-for (name in names(data_frames)) {
-  data_frames[[name]]$date <- format(data_frames[[name]]$date, "%Y-%m-%d %H:%M:%S")
+for (name in names(stations)) {
+  stations[[name]]$date <- format(stations[[name]]$date, "%Y-%m-%d %H:%M:%S")
   file_path <- file.path(output_directory, paste0("validation_", name, ".csv"))
-  write.csv(data_frames[[name]], file = file_path, row.names = FALSE)
+  write.csv(stations[[name]], file = file_path, row.names = FALSE)
 }
 
 # Calculate elevation difference and distance between station and grid point ----
@@ -111,7 +117,7 @@ write.csv(stations_validations, file = file_path, row.names = FALSE)
   points(c(y1, y2), c(x1, x2), col = 'red', pch = 19)  # points at known values
   points(c(value_at_3), c(3), col = 'blue', pch = 19)  # points at known values
   }
-# Import and process ERA5 and ERA5-Land ----
+# Process ERA5 and ERA5-Land ----
 
 #path <- "/media/ddonoso/KINGSTON/era5land"
 #path <- "/media/ddonoso/KINGSTON/era5land_fossilbluff"
@@ -269,14 +275,31 @@ era5land <- df_list
 era5land_fossil <- df_list
 era5land$fossilbluff <- era5land_fossil$fossilbluff
 
-# Calculate mean and SD in each data series ----
-setwd("/media/ddonoso/KINGSTON/validations")
+# Import processed ERA5 and ERA5-Land series ----
+setwd("/media/ddonoso/KINGSTON/validations/era5")
+setwd("/Volumes/KINGSTON/validations/era5")
+file_list <- list.files(pattern = "*\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
+df_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+names(df_list) <- gsub("\\.csv$", "", basename(file_list))
+era5 <- df_list
+era5 <- lapply(era5, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz="UTC"))
+})
 
-# Date columns in POSIXct format
+setwd("/Volumes/KINGSTON/validations/era5land")
+file_list <- list.files(pattern = "*\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
+df_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+names(df_list) <- gsub("\\.csv$", "", basename(file_list))
+era5land <- df_list
 era5land <- lapply(era5land, function(df) {
   df %>%
     mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz="UTC"))
 })
+
+# Calculate mean and SD in each data series ----
+setwd("/media/ddonoso/KINGSTON/validations")
+setwd("/Volumes/KINGSTON/validations")
 
 # Create function to extract variable columns from each data frame list
 calculate_stats <- function(df_station, df_era5, df_era5land, df_name) {
@@ -339,11 +362,494 @@ calculate_stats <- function(df_station, df_era5, df_era5land, df_name) {
 }
 
 # Apply function to each dataset in lists
-results_list <- purrr::map(names(data_frames), 
-                    ~ calculate_stats(data_frames[[.x]], era5[[.x]], era5land[[.x]], .x))
+results_list <- purrr::map(names(stations), 
+                    ~ calculate_stats(stations[[.x]], era5[[.x]], era5land[[.x]], .x))
 
 # Combine all results into a single data frame
 mean_sd_table <- bind_rows(results_list)
 
 write.csv(mean_sd_table, "mean_sd.csv", row.names = FALSE)
 
+# Normalized Bias ----
+
+calculate_stats <- function(stations, era5, era5land) {
+  
+  cols_to_analyze <- c("temp", "vel", "pres", "hr")
+  datasets <- list(era5 = era5, era5land = era5land)
+  
+  # Initialise data frames where results will be stored
+  results_df <- data.frame(
+    station = character(),
+    variable = character(),
+    dataset = character(),
+    nbias = numeric(),
+    nrmse = numeric(),
+    nmae = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Loop through each station (data frame name)
+  for (station_name in names(stations)) { # station_name = "carlini"
+    
+    df_station <- stations[[station_name]]
+    
+    # Loop through each variable
+    for (col in cols_to_analyze) { # col = "temp"
+      
+      # Loop through each dataset (era5, era5land)
+      for (dataset_name in names(datasets)) { # dataset_name = "era5land"
+        
+        df_reanalysis <- datasets[[dataset_name]][[station_name]]
+        
+        # Check if both data frames have the column and the date column exists
+        if (col %in% names(df_station) && col %in% names(df_reanalysis) && "date" %in% names(df_station) && "date" %in% names(df_reanalysis)) {
+          
+          # Merge data frames by date
+          merged_df <- full_join(
+            df_station %>% select(date, any_of(cols_to_analyze)),
+            df_reanalysis %>% select(date, all_of(cols_to_analyze)),
+            by = "date",
+            suffix = c("_station", paste0("_", dataset_name))
+          )
+          
+          # Remove rows with NA in either column
+          valid_rows <- merged_df %>% filter(!is.na(!!sym(paste0(col, "_station"))), !is.na(!!sym(paste0(col, "_", dataset_name))))
+          
+          # Compute yearly mean for normalization
+          valid_rows <- valid_rows %>%
+            group_by(year = year(date)) %>%
+            mutate(mean_col_year = mean(!!sym(paste0(col, "_station")), na.rm = TRUE)) %>%
+            ungroup()
+          
+          if (nrow(valid_rows) > 0) {
+            # Calculate normalised bias
+            nbias_value <- sum((valid_rows[[paste0(col, "_", dataset_name)]] - valid_rows[[paste0(col, "_station")]]) /
+                                 valid_rows$mean_col_year, na.rm = TRUE) / nrow(valid_rows)
+            # Calculate normalised RMSE
+            nrmse_value <- sqrt(sum(((valid_rows[[paste0(col, "_", dataset_name)]] - valid_rows[[paste0(col, "_station")]]) / 
+                                           valid_rows$mean_col_year)^2, na.rm = TRUE) / nrow(valid_rows))
+            # Calculate normalised MAE
+            nmae_value <- compute.nmae(valid_rows[[paste0(col, "_", dataset_name)]], valid_rows[[paste0(col, "_station")]])
+              
+          } else {
+            nbias_value <- NA
+            nrmse_value <- NA
+            nmae_value <- NA
+          }
+          
+          # Store result
+          results_df <- results_df %>%
+            bind_rows(data.frame(
+              station = station_name,
+              variable = col,
+              dataset = dataset_name,
+              nbias = round(nbias_value, 3),
+              nrmse = round(nrmse_value, 3),
+              nmae = round(nmae_value, 3)
+            ))
+        } else {
+          # Store NA for missing columns
+          results_df <- results_df %>%
+            add_row(station = station_name, 
+                    variable = col, 
+                    dataset = dataset_name, 
+                    nbias = NA,
+                    nrmse = NA,
+                    nmae = NA)
+        }
+      }
+    }
+  }
+
+  return(results_df)
+}
+
+# Apply function to all data sets and save results
+stats_results <- calculate_stats(stations, era5, era5land)
+
+# Reshape the results into a wide format
+stats_results_wide <- stats_results %>%
+  pivot_wider(
+    names_from = c(variable, dataset),
+    values_from = c(nbias, nrmse, nmae),
+    names_sep = "_"
+  )
+
+write.csv(stats_results, "stats_results.csv", row.names = FALSE)
+write.csv(stats_results_wide, "stats_results_wide.csv", row.names = FALSE)
+
+# Normalized bias per period ----
+
+calculate_stats_period <- function(stations, era5, era5land) {
+  
+  cols_to_analyze <- c("temp", "vel", "pres", "hr")
+  datasets <- list(era5 = era5, era5land = era5land)
+  
+  # Initialize an empty results data frame
+  results_df <- data.frame(
+    station = character(),
+    variable = character(),
+    dataset = character(),
+    period = character(),
+    nbias = numeric(),
+    nrmse = numeric(),
+    nmae = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Define period groups
+  get_period <- function(date) {
+    if (date < as.Date("2015-01-01")) {
+      return("2013/14")
+    } else if (date > as.Date("2016-01-01") & date < as.Date("2020-12-31")) {
+      return("2017/19")
+    } else if (date > as.Date("2020-01-01")) {
+      return("2021/22")
+    } else {
+      return(NA)  # For missing or invalid dates
+    }
+  }
+  
+  # Loop through each station (data frame name)
+  for (station_name in names(stations)) {
+    
+    df_station <- stations[[station_name]]
+    
+    # Loop through each variable
+    for (col in cols_to_analyze) {
+      
+      # Loop through each dataset (era5, era5land)
+      for (dataset_name in names(datasets)) {
+        
+        df_reanalysis <- datasets[[dataset_name]][[station_name]]
+        
+        # Check if both data frames have the column and the date column exists
+        if (col %in% names(df_station) && col %in% names(df_reanalysis) && "date" %in% names(df_station) && "date" %in% names(df_reanalysis)) {
+          
+          # Merge data frames by date
+          merged_df <- full_join(
+            df_station %>% select(date, any_of(cols_to_analyze)),
+            df_reanalysis %>% select(date, all_of(cols_to_analyze)),
+            by = "date",
+            suffix = c("_station", paste0("_", dataset_name)) # Add suffix to columns from x and y joined data frames
+          ) %>%
+            mutate(period = sapply(date, get_period))  # Assign period group
+          
+          # Loop through each period
+          for (period in unique(merged_df$period)) {
+            
+            period_df <- merged_df %>% filter(period == !!period)
+            
+            if (nrow(period_df) > 0) {
+              
+              # Remove rows with NA in either column
+              valid_rows <- period_df %>% filter(!is.na(!!sym(paste0(col, "_station"))), !is.na(!!sym(paste0(col, "_", dataset_name))))
+              
+              # Calculate yearly mean for normalization
+              valid_rows <- valid_rows %>%
+                group_by(year = year(date)) %>%
+                mutate(mean_col_year = mean(!!sym(paste0(col, "_station")), na.rm = TRUE)) %>%
+                ungroup()
+              
+              if (nrow(valid_rows) > 0) {
+                # Calculate normalised bias
+                nbias_value <- sum((valid_rows[[paste0(col, "_", dataset_name)]] - valid_rows[[paste0(col, "_station")]]) /
+                                     valid_rows$mean_col_year, na.rm = TRUE) / nrow(valid_rows)
+                # Calculate normalised RMSE
+                nrmse_value <- sqrt(sum(((valid_rows[[paste0(col, "_", dataset_name)]] - valid_rows[[paste0(col, "_station")]]) / 
+                                           valid_rows$mean_col_year)^2, na.rm = TRUE) / nrow(valid_rows))
+                # Calculate normalised MAE
+                nmae_value <- compute.nmae(valid_rows[[paste0(col, "_", dataset_name)]], valid_rows[[paste0(col, "_station")]])
+                
+              } else {
+                nbias_value <- NA
+                nrmse_value <- NA
+                nmae_value <- NA
+              }
+              
+              # Store result
+              results_df <- results_df %>%
+                bind_rows(data.frame(
+                  station = station_name,
+                  variable = col,
+                  dataset = dataset_name,
+                  period = period,
+                  nbias = round(nbias_value, 3),
+                  nrmse = round(nrmse_value, 3),
+                  nmae = round(nmae_value, 3)
+                  ))
+            }
+          }
+          
+        } else {
+          # Store NA for missing columns
+          results_df <- results_df %>%
+            add_row(station = station_name, 
+                    variable = col, 
+                    dataset = dataset_name, 
+                    period = NA, 
+                    nbias = NA,
+                    nrmse = NA,
+                    nmae = NA)
+        }
+      }
+    }
+  }
+  
+  return(results_df)
+}
+
+# Apply function to all datasets and save results
+stats_period_results <- calculate_stats_period(stations, era5, era5land)
+
+# Reshape the results into a wide format
+stats_period_results_wide <- stats_period_results %>%
+  pivot_wider(
+    names_from = c(variable, dataset, period),
+    values_from = c(nbias, nrmse, nmae),
+    names_sep = "_"
+  )
+
+write.csv(stats_period_results, "stats_period_results.csv", row.names = FALSE)
+write.csv(stats_period_results_wide, "stats_period_results_wide.csv", row.names = FALSE)
+
+# Seasonal bias ----
+
+# Add a Season factor to data frames
+assign_season <- function(date) {
+  month <- as.numeric(format(date, "%m"))
+  if (month %in% c(12, 1, 2)) {
+    return("DJF")
+  } else if (month %in% c(3, 4, 5)) {
+    return("MAM")
+  } else if (month %in% c(6, 7, 8)) {
+    return("JJA")
+  } else if (month %in% c(9, 10, 11)) {
+    return("SON")
+  }
+}
+
+stations <- lapply(stations, function(df) {
+  df$season <- sapply(df$date, assign_season)
+  return(df)
+})
+
+calculate_seasonal_bias <- function(stations, era5, era5land) {
+  
+  cols_to_analyze <- c("temp", "vel", "pres", "hr")
+  datasets <- list(era5 = era5, era5land = era5land)
+  
+  # Initialise data frames where results will be stored
+  results_df <- data.frame(
+    station = character(),
+    variable = character(),
+    dataset = character(),
+    season = character(),
+    bias = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Loop through each station (data frame name)
+  for (station_name in names(stations)) { # station_name = "carlini"
+    
+    df_station <- stations[[station_name]]
+    
+    # Loop through each variable
+    for (col in cols_to_analyze) { # col = "temp"
+      
+      # Loop through each dataset (era5, era5land)
+      for (dataset_name in names(datasets)) { # dataset_name = "era5land"
+        
+        df_reanalysis <- datasets[[dataset_name]][[station_name]]
+        
+        # Check if both data frames have the column and the date column exists
+        if (col %in% names(df_station) && col %in% names(df_reanalysis) && "date" %in% names(df_station) && "date" %in% names(df_reanalysis)) {
+          
+          # Merge data frames by date
+          merged_df <- full_join(
+            df_station %>% select(date, season, any_of(cols_to_analyze)),
+            df_reanalysis %>% select(date, all_of(cols_to_analyze)),
+            by = "date",
+            suffix = c("_station", paste0("_", dataset_name))
+          )
+          
+          # Remove rows with NA in either column
+          valid_rows <- merged_df %>% filter(!is.na(!!sym(paste0(col, "_station"))), !is.na(!!sym(paste0(col, "_", dataset_name))))
+          
+          # Compute yearly mean for normalization
+          valid_rows <- valid_rows %>%
+            group_by(year = year(date)) %>%
+            mutate(mean_col_year = mean(!!sym(paste0(col, "_station")), na.rm = TRUE)) %>%
+            ungroup()
+          
+          if (nrow(valid_rows) > 0) {
+            # Calculate seasonal bias
+            bias_value <- valid_rows %>%
+              group_by(season) %>%
+              summarise(
+                bias = round(mean((!!sym(paste0(col, "_", dataset_name)) - !!sym(paste0(col, "_station"))), na.rm = TRUE), 6)
+              )
+          } else {
+            bias_value <- NA
+
+          }
+          
+          # Store result
+          results_df <- results_df %>%
+            bind_rows(data.frame(
+              station = station_name,
+              variable = col,
+              dataset = dataset_name,
+              season = bias_value$season,
+              bias = bias_value$bias
+            ))
+        } else {
+          # Store NA for missing columns
+          results_df <- results_df %>%
+            add_row(station = station_name, 
+                    variable = col, 
+                    dataset = dataset_name, 
+                    season = NA,
+                    bias = NA)
+        }
+      }
+    }
+  }
+  
+  return(results_df)
+}
+
+# Apply function to all data sets and save results
+seasonal_bias <- calculate_seasonal_bias(stations, era5, era5land)
+
+# Reshape the results into a wide format
+seasonal_bias_wide <- seasonal_bias %>%
+  pivot_wider(
+    names_from = c(variable, dataset, season),
+    values_from = c(bias),
+    names_sep = "_"
+  )
+
+write.csv(seasonal_bias, "seasonal_bias.csv", row.names = FALSE)
+write.csv(seasonal_bias_wide, "seasonal_bias_wide.csv", row.names = FALSE)
+
+
+
+calculate_seasonal_bias_period <- function(stations, era5, era5land) {
+  
+  cols_to_analyze <- c("temp", "vel", "pres", "hr")
+  datasets <- list(era5 = era5, era5land = era5land)
+  
+  # Initialize an empty results data frame
+  results_df <- data.frame(
+    station = character(),
+    variable = character(),
+    dataset = character(),
+    period = character(),
+    season = character(),
+    bias = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Define period groups
+  get_period <- function(date) {
+    if (date < as.Date("2015-01-01")) {
+      return("2013/14")
+    } else if (date > as.Date("2016-01-01") & date < as.Date("2020-12-31")) {
+      return("2017/19")
+    } else if (date > as.Date("2020-01-01")) {
+      return("2021/22")
+    } else {
+      return(NA)  # For missing or invalid dates
+    }
+  }
+  
+  # Loop through each station (data frame name)
+  for (station_name in names(stations)) {
+    
+    df_station <- stations[[station_name]]
+    
+    # Loop through each variable
+    for (col in cols_to_analyze) {
+      
+      # Loop through each dataset (era5, era5land)
+      for (dataset_name in names(datasets)) {
+        
+        df_reanalysis <- datasets[[dataset_name]][[station_name]]
+        
+        # Check if both data frames have the column and the date column exists
+        if (col %in% names(df_station) && col %in% names(df_reanalysis) && "date" %in% names(df_station) && "date" %in% names(df_reanalysis)) {
+          
+          # Merge data frames by date
+          merged_df <- full_join(
+            df_station %>% select(date, season, any_of(cols_to_analyze)),
+            df_reanalysis %>% select(date, all_of(cols_to_analyze)),
+            by = "date",
+            suffix = c("_station", paste0("_", dataset_name)) # Add suffix to columns from x and y joined data frames
+          ) %>%
+            mutate(period = sapply(date, get_period))  # Assign period group
+          
+          # Loop through each period
+          for (period in unique(merged_df$period)) {
+            
+            period_df <- merged_df %>% filter(period == !!period)
+            
+            if (nrow(period_df) > 0) {
+              
+              # Remove rows with NA in either column
+              valid_rows <- period_df %>% filter(!is.na(!!sym(paste0(col, "_station"))), !is.na(!!sym(paste0(col, "_", dataset_name))))
+ 
+              if (nrow(valid_rows) > 0) {
+                # Calculate seasonal bias
+                bias_value <- valid_rows %>%
+                  group_by(season) %>%
+                  summarise(
+                    bias = round(mean((!!sym(paste0(col, "_", dataset_name)) - !!sym(paste0(col, "_station"))), na.rm = TRUE), 6)
+                  )
+              } else {
+                bias_value <- NA
+              }
+              
+              # Store result
+              results_df <- results_df %>%
+                bind_rows(data.frame(
+                  station = station_name,
+                  variable = col,
+                  dataset = dataset_name,
+                  period = period,
+                  season = bias_value$season,
+                  bias = bias_value$bias
+                ))
+            }
+          }
+          
+        } else {
+          # Store NA for missing columns
+          results_df <- results_df %>%
+            add_row(station = station_name, 
+                    variable = col, 
+                    dataset = dataset_name, 
+                    period = NA, 
+                    season = NA,
+                    bias = NA)
+        }
+      }
+    }
+  }
+  
+  return(results_df)
+}
+
+# Apply function to all datasets and save results
+seasonal_bias_period_results <- calculate_seasonal_bias_period(stations, era5, era5land)
+
+# Reshape the results into a wide format
+seasonal_bias_period_results_wide <- seasonal_bias_period_results %>%
+  pivot_wider(
+    names_from = c(variable, dataset, period, season),
+    values_from = c(bias),
+    names_sep = "_"
+  )
+
+write.csv(seasonal_bias_period_results, "seasonal_bias_period_results.csv", row.names = FALSE)
+write.csv(seasonal_bias_period_results_wide, "seasonal_bias_period_results_wide.csv", row.names = FALSE)
