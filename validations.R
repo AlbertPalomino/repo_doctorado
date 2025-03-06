@@ -2,11 +2,11 @@ library(dplyr)
 library(tidyr)
 library(lubridate)
 library(DTWBI)
-setwd("/Volumes/KINGSTON/validations")
+setwd("/Volumes/Pengo2/Doctorado/validations")
 
 # Import station data ----
-setwd("/media/ddonoso/KINGSTON/station_series")
-setwd("/Volumes/KINGSTON/station_series")
+setwd("/media/ddonoso/Pengo2/Doctorado/station_series")
+setwd("/Volumes/Pengo2/Doctorado/station_series")
 
 file_list <- list.files(pattern = "^validation_", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
 station_list <- lapply(file_list, read.csv)
@@ -35,7 +35,7 @@ stations <- lapply(stations, function(df) {
 rm(station_list)
 
 # Export datasets
-output_directory <- "/media/ddonoso/KINGSTON/station_series/"
+output_directory <- "/media/ddonoso/Pengo2/Doctorado/station_series/"
 
 for (name in names(stations)) {
   stations[[name]]$date <- format(stations[[name]]$date, "%Y-%m-%d %H:%M:%S")
@@ -82,7 +82,7 @@ for (i in seq_len(n_groups)) {
 
 # Add distances to the data frame
 stations_validations$distance <- distances
-output_directory <- "/media/ddonoso/KINGSTON"
+output_directory <- "/media/ddonoso/Pengo2/Doctorado/validations"
 file_path <- file.path(output_directory, paste0("coords_dist.csv"))
 write.csv(stations_validations, file = file_path, row.names = FALSE)
 
@@ -256,7 +256,7 @@ df_list <- lapply(df_list, function(df) {
 })
 
 # Save each data frame and rename the df list
-output_directory <- "/media/ddonoso/KINGSTON/validations/era5"
+output_directory <- "/media/ddonoso/Pengo2/Doctorado/validations/era5"
 
 df_list <- lapply(df_list, function(df) {
   df %>%
@@ -276,8 +276,8 @@ era5land_fossil <- df_list
 era5land$fossilbluff <- era5land_fossil$fossilbluff
 
 # Import processed ERA5 and ERA5-Land series ----
-setwd("/media/ddonoso/KINGSTON/validations/era5")
-setwd("/Volumes/KINGSTON/validations/era5")
+setwd("/media/ddonoso/Pengo2/Doctorado/validations/era5")
+setwd("/Volumes/Pengo2/Doctorado/validations/era5")
 file_list <- list.files(pattern = "*\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
 df_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
 names(df_list) <- gsub("\\.csv$", "", basename(file_list))
@@ -287,9 +287,9 @@ era5 <- lapply(era5, function(df) {
     mutate(date = as.POSIXct(date, format = "%Y-%m-%d %H:%M:%S", tz="UTC"))
 })
 
-setwd("/Volumes/KINGSTON/validations/era5land")
-file_list <- list.files(pattern = "*\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
-df_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+setwd("/Volumes/Pengo2/Doctorado/validations/era5land")
+file_list <- list.files(pattern = "*\\.csv$", full.names = TRUE, recursive = FALSE)
+df_list <- lapply(file_list, read.csv)
 names(df_list) <- gsub("\\.csv$", "", basename(file_list))
 era5land <- df_list
 era5land <- lapply(era5land, function(df) {
@@ -298,11 +298,11 @@ era5land <- lapply(era5land, function(df) {
 })
 
 # Calculate mean and SD in each data series ----
-setwd("/media/ddonoso/KINGSTON/validations")
-setwd("/Volumes/KINGSTON/validations")
+setwd("/media/ddonoso/Pengo2/Doctorado/validations")
+setwd("/Volumes/Pengo2/Doctorado/validations")
 
 # Create function to extract variable columns from each data frame list
-calculate_stats <- function(df_station, df_era5, df_era5land, df_name) {
+calculate_mean_sd <- function(df_station, df_era5, df_era5land, df_amps, df_name) {
   
   cols_to_analyze <- c("temp", "vel", "pres")
   stats_df <- data.frame(df_name = df_name, stringsAsFactors = FALSE)
@@ -320,11 +320,21 @@ calculate_stats <- function(df_station, df_era5, df_era5land, df_name) {
                 rename_with(~paste0(., "_era5land"), -date),
               by = "date")
   
-  # Compute statistics for temp, vel, and prec
+  # Conditionally join AMPS if available
+  if (!is.null(df_amps)) {
+    merged_df <- full_join(merged_df,
+                           df_amps %>%
+                             select(date, all_of(cols_to_analyze), any_of("hr")) %>%
+                             rename_with(~paste0(., "_amps"), -date),
+                           by = "date")
+  }
+  
+  # Compute statistics for temp, vel, and pres
   for (col in cols_to_analyze) {
     col_station <- paste0(col, "_station")
     col_era5 <- paste0(col, "_era5")
     col_era5land <- paste0(col, "_era5land")
+    col_amps <- paste0(col, "_amps")
     
     stats <- merged_df %>%
       select(all_of(c(col_station, col_era5, col_era5land))) %>%
@@ -337,6 +347,19 @@ calculate_stats <- function(df_station, df_era5, df_era5land, df_name) {
         !!paste0(col_era5land, "_mean") := round(mean(.data[[col_era5land]]), 2),
         !!paste0(col_era5land, "_sd") := round(sd(.data[[col_era5land]]), 2)
       )
+    
+    # If AMPS exists, add its statistics
+    if (col_amps %in% names(merged_df)) {
+      amps_stats <- merged_df %>%
+        select(any_of(col_amps)) %>%
+        na.omit() %>%
+        summarise(
+          !!paste0(col_amps, "_mean") := round(mean(.data[[col_amps]]), 2),
+          !!paste0(col_amps, "_sd") := round(sd(.data[[col_amps]]), 2)
+        )
+      
+      stats <- bind_cols(stats, amps_stats)
+    }
     
     stats_df <- bind_cols(stats_df, stats)
   }
@@ -355,24 +378,48 @@ calculate_stats <- function(df_station, df_era5, df_era5land, df_name) {
         hr_era5land_sd = round(sd(hr_era5land), 2)
       )
     
+    # If AMPS exists, add hr statistics
+    if ("hr_amps" %in% names(merged_df)) {
+      hr_amps_stats <- merged_df %>%
+        select(hr_amps) %>%
+        na.omit() %>%
+        summarise(
+          hr_amps_mean = round(mean(hr_amps), 2),
+          hr_amps_sd = round(sd(hr_amps), 2)
+        )
+      
+      hr_stats <- bind_cols(hr_stats, hr_amps_stats)
+    }
+    
     stats_df <- bind_cols(stats_df, hr_stats)
   }
   
   return(stats_df)
 }
 
-# Apply function to each dataset in lists
-results_list <- purrr::map(names(stations), 
-                    ~ calculate_stats(stations[[.x]], era5[[.x]], era5land[[.x]], .x))
+# Apply function to all data sets
+use_amps <- exists("amps") # Check if AMPS exists in the global environment
+
+results_list <- purrr::map(names(stations), ~ {
+  station_name <- .x
+  
+  calculate_mean_sd(
+    df_station = stations[[station_name]], 
+    df_era5 = era5[[station_name]], 
+    df_era5land = era5land[[station_name]], 
+    df_amps = if (use_amps) amps[[station_name]] else NULL, 
+    df_name = station_name
+  )
+})
 
 # Combine all results into a single data frame
 mean_sd_table <- bind_rows(results_list)
 
 write.csv(mean_sd_table, "mean_sd.csv", row.names = FALSE)
 
-# Normalized Bias ----
+# Calculate nbias, nrmse, nmae ----
 
-calculate_stats <- function(stations, era5, era5land) {
+calculate_stats <- function(stations, era5, era5land, amps) {
   
   cols_to_analyze <- c("temp", "vel", "pres", "hr")
   datasets <- list(era5 = era5, era5land = era5land)
@@ -478,7 +525,7 @@ stats_results_wide <- stats_results %>%
 write.csv(stats_results, "stats_results.csv", row.names = FALSE)
 write.csv(stats_results_wide, "stats_results_wide.csv", row.names = FALSE)
 
-# Normalized bias per period ----
+# nbias, nrmse, nmae per period ----
 
 calculate_stats_period <- function(stations, era5, era5land) {
   
@@ -853,3 +900,186 @@ seasonal_bias_period_results_wide <- seasonal_bias_period_results %>%
 
 write.csv(seasonal_bias_period_results, "seasonal_bias_period_results.csv", row.names = FALSE)
 write.csv(seasonal_bias_period_results_wide, "seasonal_bias_period_results_wide.csv", row.names = FALSE)
+
+# Analyse daily data ----
+  # Process daily ERA5 and ERA5-Land ----
+
+#path <- "/media/ddonoso/KINGSTON/era5land"
+#path <- "/media/ddonoso/KINGSTON/era5land_fossilbluff"
+path <- "/media/ddonoso/KINGSTON/era5"
+path <- "/Volumes/Pengo2/Doctorado/validations/era5monthly"
+path <- "/Volumes/Pengo2/Doctorado/validations/era5land_daily"
+path <- "/Volumes/Pengo2/Doctorado/validations/era5land_monthly"
+path <- "/Volumes/Pengo2/Doctorado/validations/era5land_fossilbluff_daily"
+path <- "/Volumes/Pengo2/Doctorado/validations/era5land_fossilbluff_monthly"
+setwd(path)
+
+file_list <- list.files(pattern = "*\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
+
+df_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
+names(df_list) <- gsub("^era5land_|\\.csv$", "", basename(file_list))
+names(df_list) <- gsub("^era5_|\\.csv$", "", basename(file_list))
+
+# Remove unwanted stations
+remove <- c("ferraz", "byers", "dismal", "kirkwood", "racer", "hugo", "gdg","hurd")
+df_list <- df_list[!names(df_list) %in% remove]
+
+# Store original names
+original_names <- names(df_list)
+
+# Daily data - Create date column
+df_list <- lapply(df_list, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(paste(Year, Month, Day, sep = "-"), format = "%Y-%m-%d", tz = "UTC")) %>%
+    select(date, everything())  %>%    # Reorder columns, date first
+    select(-c(Year, Month, Day))
+})
+
+# Monthly data - Create date column
+df_list <- lapply(df_list, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(paste(Year, Month, "01", sep = "-"), format = "%Y-%m-%d", tz = "UTC")) %>% 
+    select(date, everything())  %>% 
+    select(-c(Year, Month))
+})
+
+# Subset study periods
+df_list <- lapply(df_list, function(df) {
+  df %>%
+    mutate(date = as.POSIXct(date, tz="UTC")) %>%
+    dplyr::filter(
+      (date >= as.POSIXct("2013-10-11 15:00:00", tz="UTC") & date < as.POSIXct("2014-11-30 03:00:00", tz="UTC")) |
+        (date >= as.POSIXct("2017-07-27 22:00:00", tz="UTC") & date < as.POSIXct("2019-05-15 22:00:00", tz="UTC")) |
+        (date >= as.POSIXct("2021-06-07 19:00:00", tz="UTC") & date < as.POSIXct("2022-09-23 00:00:00", tz="UTC"))) %>%
+    select(date, everything())
+})
+
+# Convert temp, dew and skin temp from Kelvin to Celsius for each data frame
+df_list <- lapply(df_list, function(df) {
+  df %>%
+    mutate(across(any_of(c("temp","dew","skt")), ~ . - 273.15))  # Kelvin to Celsius
+})
+
+# Calculate relative humidity
+library(humidity)
+df_list <- lapply(df_list, function(df) {
+  df %>%
+    mutate(hr = RH(temp, dew, isK = FALSE)) %>%
+    select(-dew)
+})
+
+# Temperature correction using temperature environmental vertical lapse rate of 6.5 C/km
+
+stations_validations <- read.csv("/Volumes/Pengo2/Doctorado/validations/coords_dist.csv", header = T, sep = ",")
+elev_diff <- stations_validations[stations_validations$dataset == "era5land", c(2,8,9)]
+#elev_diff <- stations_validations[stations_validations$dataset == "era5", c(2,8,9)]
+
+df_list <- lapply(seq_along(df_list), function(i) {
+  
+  dataset_name <- names(df_list)[i]
+  
+  temp_adjustment <- elev_diff$temp_diff[elev_diff$station == dataset_name]
+  
+  df_list[[i]] <- df_list[[i]] %>%
+    rename(
+      old_temp = any_of("temp"),
+      old_skt = any_of("skt")) %>%
+    mutate(
+      temp = if ("old_temp" %in% names(.)) old_temp + temp_adjustment,
+      skt = if ("old_skt" %in% names(.)) old_skt + temp_adjustment)
+})
+
+names(df_list) <- original_names
+
+# Transform u10 and v10 to wind speed and direction for each data frame
+df_list <- lapply(df_list, function(df) {
+  df %>%
+    mutate(
+      vel10 = sqrt(u10^2 + v10^2),  # Calculate wind speed
+      dir = (270 - (atan2(v10, u10) * (180 / pi))) %% 360  # Calculate wind direction in degrees
+    )
+})
+
+# Calculate wind speed at 3 m based on a logarithmic attenuation
+df_list <- lapply(df_list, function(df) {
+  
+  # Vector to store the value at x = 3 for each row
+  df$vel <- NA
+  
+  # Iterate through each row to calculate the value at x = 3
+  for (i in 1:nrow(df)) {
+    y2 <- df$vel10[i]  # Get the vel value for the current row
+    x1 <- 0.0001
+    y1 <- 0
+    x2 <- 10
+    
+    # Calculate the coefficients a and c based on the current y2
+    a <- (y2 - y1) / (log(x2) - log(x1))
+    c <- y1 - a * log(x1)
+    
+    # Define the logarithmic function
+    log_function <- function(x) {
+      a * log(x) + c
+    }
+    
+    # Calculate the value at x = 3 for the current row
+    df$vel[i] <- log_function(3)
+  }
+  return(df)
+})
+
+# In ERA5: Transform Mean Sea Level Pressure from Pa to hPa
+df_list <- lapply(df_list, function(df) {
+  df %>%
+    mutate(pres = pres / 100)
+})
+
+# In ERA5-Land: Adjust pressure according to elevation difference
+df_list <- lapply(seq_along(df_list), function(i) {
+
+  P0 <- 101325  # Pa
+  g <- 9.81     # m/s²
+  M <- 0.029    # kg/mol
+  R <- 8.314    # J/(mol·K)
+  T <- df_list[[i]]$old_temp + 273.15 # degrees Kelvin
+  
+  dataset_name <- names(df_list)[i]
+  delta_h <- elev_diff$elevation_diff[elev_diff$station == dataset_name]
+  
+  delta_P <- P0 * (g * M / (R * T)) * delta_h  # Calculate delta_P for each station's elevation difference 
+  
+  df_list[[i]] %>%
+    rename(old_pres = pres) %>% 
+    mutate(pres = as.numeric(old_pres) + delta_P) %>% 
+    mutate(pres = pres / 100)  # Convert resulting pressure back to hPa
+})
+
+names(df_list) <- original_names
+
+# Save each data frame and rename the df list
+output_directory <- "/Volumes/Pengo2/Doctorado/validations/era5daily"
+output_directory <- "/Volumes/Pengo2/Doctorado/validations/era5monthly"
+output_directory <- "/Volumes/Pengo2/Doctorado/validations/era5land_daily"
+output_directory <- "/Volumes/Pengo2/Doctorado/validations/era5land_monthly"
+output_directory <- "/Volumes/Pengo2/Doctorado/validations/era5land_fossilbluff_daily"
+output_directory <- "/Volumes/Pengo2/Doctorado/validations/era5land_fossilbluff_monthly"
+
+for (name in names(df_list)) {
+  df_list[[name]]$date <- format(df_list[[name]]$date, "%Y-%m-%d")
+  file_path <- file.path(output_directory, paste0(name, ".csv"))
+  write.csv(df_list[[name]], file = file_path, row.names = FALSE)
+}
+
+era5land_monthly$fossilbluff <- era5land_fossil_monthly$fossilbluff
+era5land_fossil_monthly <- df_list
+era5land_daily$fossilbluff <- era5land_fossil_daily$fossilbluff
+era5land_fossil_daily <- df_list
+era5land_monthly <- df_list
+era5land_daily <- df_list
+era5monthly <- df_list
+era5daily <- df_list
+era5 <- df_list
+era5land <- df_list
+era5land_fossil <- df_list
+era5land$fossilbluff <- era5land_fossil$fossilbluff
+

@@ -373,8 +373,8 @@ dev.copy2pdf(file="m8.pdf", width = 6, height = 6)
 # Meteorology ----
 
 # Load necessary libraries
-library(dplyr) # For data manipulation
-library(lubridate) # For date-time functions
+library(dplyr) 
+library(lubridate)
 library(stringr)
 library(purrr)
 library(humidity)
@@ -448,7 +448,7 @@ escudero <- merged[merged$date > as.POSIXct("1979-12-31 21:00:00", tz="UTC"),]
 write.csv(escudero, "escudero.csv", row.names = FALSE)
 rm(hum,dew,pres,prec,temp,wind,tmax,tmin,diarioRR)
 
-# fill escudero with hourly data ----
+      # fill escudero with hourly data ----
 
 # Step 1: Determine min and max dates 
 min_date <- as.POSIXct(min(escudero$date))
@@ -858,7 +858,7 @@ fill_na_for_all_hours <- function(df) {
         }
       }
     }
-
+}
 
 # Save the combined dataframe to a .csv file
 write.csv(df, "palmer_3oct24.csv", row.names = FALSE)
@@ -2056,7 +2056,9 @@ for (name in names(stations)) {
 }
   
     # Process ERA5-Land ----
+
 setwd("/media/ddonoso/Pengo2/Doctorado/data exploration/meteo/era5land")
+
 file_list <- list.files(pattern = "\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
 
 era5land_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
@@ -2222,7 +2224,6 @@ names(era5) <- gsub("^datos_|\\.csv$", "", basename(file_list)) # Name each data
   df <- df %>%
     mutate(across(everything(), as.numeric))  # Convert all columns to numeric
   return(df)
-})
 
 # Convert Julian date in the date column for each data frame - hour in seconds since 1970-01-01 00:00:00
 era5_date <- lapply(era5, function(df) {
@@ -2273,7 +2274,6 @@ era5_vel3 <- lapply(era5_wind, function(df) {
   }
   return(df)
 })
-
 
 # Temperature correction using temperature environmental vertical lapse rate of 6.5 C/km
 file_path= "/Volumes/Pengo2/Doctorado/datos_netcdf_rema/era5land/station_locations.csv"
