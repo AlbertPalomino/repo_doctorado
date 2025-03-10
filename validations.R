@@ -44,17 +44,75 @@ for (name in names(stations)) {
 }
 
 # Calculate elevation difference and distance between station and grid point ----
+
+# Read weather stations and grid points
+stations <- read.csv("all_coords_long.csv", sep = ",", header = TRUE)
+
+# Rename models and stations - recode factor levels
+stations$station_type <- {recode(stations$dataset, 
+                                 station = "Weather Stations", 
+                                 era5land = "ERA5 Land", 
+                                 era5 = "ERA5", 
+                                 racmo5.5 = "RACMO 5.5km", 
+                                 racmo11 = "RACMO 11km")
+} 
+stations$station_label <- {recode(stations$station, 
+                                  ferraz = "Ferraz", 
+                                  escudero = "Frei", 
+                                  carlini = "Carlini", 
+                                  prat = "Prat", 
+                                  jci = "Juan Carlos I",
+                                  byers = "Byers",
+                                  gdg = "Gabriel de Castilla",
+                                  ohiggins = "O'Higgins",
+                                  esperanza = "Esperanza",
+                                  racer = "Racer Rock",
+                                  palmer = "Palmer",
+                                  hugo = "Hugo Island",
+                                  vernadsky = "Vernadsky",
+                                  dismal = "Dismal Island",
+                                  sanmartin = "San Martín",
+                                  hurd = "Hurd Glacier",
+                                  rothera = "Rothera",
+                                  fossilbluff = "Fossil Bluff",
+                                  kirkwood = "Kirkwood Island",
+                                  kingsejong = "King Sejong")
+}
+
+stations_racmo11 <- read.csv("coords_racmo11.csv", sep = ",", header = TRUE)
+stations_racmo11 <- stations_racmo11 %>% rename(station = Var2, racmo_lat = racmo55_lat, racmo_lon = racmo55_lon, racmo_elev = racmo55_elev)
+stations$racmo_elev <- NA
+stations <- stations %>%
+  left_join(stations_racmo11 %>% select(station, racmo_elev), 
+            by = "station") %>%
+  mutate(elevation = if_else(dataset == "racmo11", racmo_elev, elevation)) %>%
+  select(-racmo_elev)  # Remove redundant columns
+
+stations_racmo55 <- read.csv("coords_racmo55.csv", sep = ",", header = TRUE)
+stations_racmo55 <- stations_racmo55 %>% rename(station = Var2, racmo_elev = racmo55_elev)
+stations <- stations %>%
+  left_join(stations_racmo55 %>% select(station, racmo_elev), 
+            by = "station") %>%
+  mutate(elevation = if_else(dataset == "racmo5.5", racmo_elev, elevation)) %>%
+  select(-racmo_elev)
+
+new_stations <- read.csv("elevation_stations_090325.csv", sep = ";", header = TRUE)
+stations <- stations %>%
+  left_join(new_stations %>% select(station, new_elevation), 
+            by = "station") %>%
+  mutate(elevation = if_else(dataset == "station", new_elevation, elevation)) %>%
+  select(-new_elevation)
+
+# Remove stations excluded from validations
+stations_validations <- stations %>%
+  dplyr::filter(!station %in% c("hurd", "byers", "ferraz", "dismal", "kirkwood", "racer", "hugo", "gdg"))
+
 stations_validations <- stations_validations %>%
   group_by(station) %>%
   mutate(elevation_diff = elevation - elevation[dataset == "station"]) %>%
   ungroup()
 
 # Calculate distances using distHaversine for all points
-coords1 <- as.matrix(sations_validations[c(1:12), c(4, 3)])  # Extract station coordinates from df stations (longitude, latitude)
-coords2 <- as.matrix(stations[, c(5, 4)])  # Extract reanalysis coordinates from df stations (longitude, latitude)
-distances <- distHaversine(coords1, coords2)  # Distance in meters
-stations$distance <- distances / 1000 # Convert distances to kilometers and add as a new column
-
 library(geosphere)
 library(dplyr)
 
@@ -62,7 +120,7 @@ library(dplyr)
 n_groups <- nrow(stations_validations) / 12  
 
 # Initialize an empty vector for distances
-distances <- numeric(nrow(stations_validations))
+stations_validations$distance <- 0
 
 # Loop through each group of 12 rows
 for (i in seq_len(n_groups)) {
@@ -76,13 +134,11 @@ for (i in seq_len(n_groups)) {
   # Extract reanalysis coordinates (next 12 rows)
   coords2 <- as.matrix(stations_validations[start_idx:end_idx, c(4, 3)])
   
-  # Compute Haversine distance (meters) and convert to km
-  distances[start_idx:end_idx] <- distHaversine(coords1, coords2) / 1000  
+  # Compute Haversine distance and convert to km
+  stations_validations$distance[start_idx:end_idx] <- distHaversine(coords1, coords2) / 1000  
 }
 
-# Add distances to the data frame
-stations_validations$distance <- distances
-output_directory <- "/media/ddonoso/Pengo2/Doctorado/validations"
+output_directory <- "/Volumes/Pengo2/Doctorado/validations"
 file_path <- file.path(output_directory, paste0("coords_dist.csv"))
 write.csv(stations_validations, file = file_path, row.names = FALSE)
 
@@ -307,7 +363,7 @@ calculate_mean_sd <- function(df_station, df_era5, df_era5land, df_amps, df_name
   cols_to_analyze <- c("temp", "vel", "pres")
   stats_df <- data.frame(df_name = df_name, stringsAsFactors = FALSE)
   
-  # Join datasets by date, ensuring correct suffixes
+  # Join data sets by date, adding data set suffixes
   merged_df <- df_station %>%
     select(date, all_of(cols_to_analyze), any_of("hr")) %>%
     rename_with(~paste0(., "_station"), -date) %>%
@@ -912,6 +968,7 @@ path <- "/Volumes/Pengo2/Doctorado/validations/era5land_daily"
 path <- "/Volumes/Pengo2/Doctorado/validations/era5land_monthly"
 path <- "/Volumes/Pengo2/Doctorado/validations/era5land_fossilbluff_daily"
 path <- "/Volumes/Pengo2/Doctorado/validations/era5land_fossilbluff_monthly"
+path <- "/Volumes/Pengo2/Doctorado/validations/racmo11"
 setwd(path)
 
 file_list <- list.files(pattern = "*\\.csv$", full.names = TRUE, recursive = FALSE) # recursive to read within subfolders too
@@ -919,6 +976,7 @@ file_list <- list.files(pattern = "*\\.csv$", full.names = TRUE, recursive = FAL
 df_list <- lapply(file_list, read.csv) # Read each CSV file into a separate data frame
 names(df_list) <- gsub("^era5land_|\\.csv$", "", basename(file_list))
 names(df_list) <- gsub("^era5_|\\.csv$", "", basename(file_list))
+names(df_list) <- gsub("\\.csv$", "", basename(file_list))
 
 # Remove unwanted stations
 remove <- c("ferraz", "byers", "dismal", "kirkwood", "racer", "hugo", "gdg","hurd")
