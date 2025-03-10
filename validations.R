@@ -48,45 +48,14 @@ for (name in names(stations)) {
 # Read weather stations and grid points
 stations <- read.csv("all_coords_long.csv", sep = ",", header = TRUE)
 
-# Rename models and stations - recode factor levels
-stations$station_type <- {recode(stations$dataset, 
-                                 station = "Weather Stations", 
-                                 era5land = "ERA5 Land", 
-                                 era5 = "ERA5", 
-                                 racmo5.5 = "RACMO 5.5km", 
-                                 racmo11 = "RACMO 11km")
-} 
-stations$station_label <- {recode(stations$station, 
-                                  ferraz = "Ferraz", 
-                                  escudero = "Frei", 
-                                  carlini = "Carlini", 
-                                  prat = "Prat", 
-                                  jci = "Juan Carlos I",
-                                  byers = "Byers",
-                                  gdg = "Gabriel de Castilla",
-                                  ohiggins = "O'Higgins",
-                                  esperanza = "Esperanza",
-                                  racer = "Racer Rock",
-                                  palmer = "Palmer",
-                                  hugo = "Hugo Island",
-                                  vernadsky = "Vernadsky",
-                                  dismal = "Dismal Island",
-                                  sanmartin = "San Martín",
-                                  hurd = "Hurd Glacier",
-                                  rothera = "Rothera",
-                                  fossilbluff = "Fossil Bluff",
-                                  kirkwood = "Kirkwood Island",
-                                  kingsejong = "King Sejong")
-}
-
 stations_racmo11 <- read.csv("coords_racmo11.csv", sep = ",", header = TRUE)
 stations_racmo11 <- stations_racmo11 %>% rename(station = Var2, racmo_lat = racmo55_lat, racmo_lon = racmo55_lon, racmo_elev = racmo55_elev)
-stations$racmo_elev <- NA
 stations <- stations %>%
   left_join(stations_racmo11 %>% select(station, racmo_elev), 
             by = "station") %>%
   mutate(elevation = if_else(dataset == "racmo11", racmo_elev, elevation)) %>%
   select(-racmo_elev)  # Remove redundant columns
+rm(stations_racmo11)
 
 stations_racmo55 <- read.csv("coords_racmo55.csv", sep = ",", header = TRUE)
 stations_racmo55 <- stations_racmo55 %>% rename(station = Var2, racmo_elev = racmo55_elev)
@@ -95,6 +64,28 @@ stations <- stations %>%
             by = "station") %>%
   mutate(elevation = if_else(dataset == "racmo5.5", racmo_elev, elevation)) %>%
   select(-racmo_elev)
+rm(stations_racmo55)
+
+stations_era5 <- read.csv("coords_era5.csv", sep = ",", header = TRUE)
+stations <- stations %>%
+  left_join(stations_era5 %>% select(station, elev), 
+            by = "station") %>%
+  mutate(elevation = if_else(dataset == "era5", elev, elevation)) %>%
+  select(-elev)
+rm(stations_era5)
+
+stations_era5land <- read.csv("coords_era5land.csv", sep = ",", header = TRUE)
+stations <- stations %>%
+  left_join(stations_era5land %>% select(station, elev), 
+            by = "station") %>%
+  mutate(elevation = if_else(dataset == "era5land", elev, elevation)) %>%
+  select(-elev)
+rm(stations_era5land)
+
+stations_amps <- read.csv("coords_amps.csv", sep = ",", header = TRUE)
+stations_amps <- stations_amps %>%
+  mutate(dataset = "amps") %>%
+  select(dataset,station,lat,long,elevation)
 
 new_stations <- read.csv("elevation_stations_090325.csv", sep = ";", header = TRUE)
 stations <- stations %>%
@@ -102,6 +93,9 @@ stations <- stations %>%
             by = "station") %>%
   mutate(elevation = if_else(dataset == "station", new_elevation, elevation)) %>%
   select(-new_elevation)
+rm(new_stations)
+
+stations <- rbind(stations, stations_amps)
 
 # Remove stations excluded from validations
 stations_validations <- stations %>%
@@ -136,6 +130,39 @@ for (i in seq_len(n_groups)) {
   
   # Compute Haversine distance and convert to km
   stations_validations$distance[start_idx:end_idx] <- distHaversine(coords1, coords2) / 1000  
+}
+
+# Rename models and stations - recode factor levels
+stations_validations$station_type <- {recode(stations_validations$dataset, 
+                                             station = "Weather Stations", 
+                                             era5land = "ERA5 Land", 
+                                             era5 = "ERA5", 
+                                             racmo5.5 = "RACMO 5.5km", 
+                                             racmo11 = "RACMO 11km",
+                                             amps = "AMPS")
+} 
+
+stations_validations$station_label <- {recode(stations_validations$station, 
+                                              ferraz = "Ferraz", 
+                                              escudero = "Frei", 
+                                              carlini = "Carlini", 
+                                              prat = "Prat", 
+                                              jci = "Juan Carlos I",
+                                              byers = "Byers",
+                                              gdg = "Gabriel de Castilla",
+                                              ohiggins = "O'Higgins",
+                                              esperanza = "Esperanza",
+                                              racer = "Racer Rock",
+                                              palmer = "Palmer",
+                                              hugo = "Hugo Island",
+                                              vernadsky = "Vernadsky",
+                                              dismal = "Dismal Island",
+                                              sanmartin = "San Martín",
+                                              hurd = "Hurd Glacier",
+                                              rothera = "Rothera",
+                                              fossilbluff = "Fossil Bluff",
+                                              kirkwood = "Kirkwood Island",
+                                              kingsejong = "King Sejong")
 }
 
 output_directory <- "/Volumes/Pengo2/Doctorado/validations"
